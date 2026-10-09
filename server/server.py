@@ -8,6 +8,7 @@ from datetime import datetime
 HOST = "0.0.0.0"
 PORT = 5000
 MAX_LINE = 1024  # satır başına en fazla 1 KB
+CHANNELS = 8     # ışık ve ses için kanal sayısı (kanallar 1-8)
 
 
 class LineBuffer:
@@ -49,6 +50,129 @@ class LineBuffer:
         return out
 
 
+class ProtocolError(Exception):
+    """İstemciye hata yanıtı olarak dönecek protokol hatası."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class DeviceState:
+    """Cihazın durumu: 8 ışık ve 8 ses kanalı (seviye + mute).
+
+    Birden fazla istemci thread'i aynı anda erişebilir, bu yüzden
+    her okuma ve yazma Lock ile korunur.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._light = [0] * CHANNELS
+        self._audio = [{"level": 0, "mute": False} for _ in range(CHANNELS)]
+
+    def set_level(self, kind, channel, value):
+        with self._lock:
+            if kind == "light":
+                self._light[channel - 1] = value
+            else:
+                self._audio[channel - 1]["level"] = value
+
+    def set_mute(self, channel, mute):
+        with self._lock:
+            self._audio[channel - 1]["mute"] = mute
+
+    def snapshot(self):
+        """Durumun kopyasını döndürür (kilit dışında güvenle kullanılabilir)."""
+        with self._lock:
+            return {
+                "light": list(self._light),
+                "audio": [dict(a) for a in self._audio],
+            }
+
+
+STATE = DeviceState()  # tüm istemcilerin paylaştığı tek cihaz durumu
+
+
+def is_int(value):
+    # bool, Python'da int'in alt sınıfıdır. true/false'u sayı saymamak için ayrıca eleriz.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def get_channel(msg):
+    channel = msg.get("channel")
+    if not is_int(channel) or not 1 <= channel <= CHANNELS:
+        raise ProtocolError("INVALID_CHANNEL", "kanal 1-8 arasında bir tam sayı olmalı")
+    return channel
+
+
+def handle_ping(msg):
+    return {"status": "ok", "cmd": "pong"}
+
+
+def handle_set_level(msg):
+    kind = msg.get("type")
+    if kind not in ("light", "audio"):
+        raise ProtocolError("INVALID_VALUE", "type 'light' veya 'audio' olmalı")
+    channel = get_channel(msg)
+    value = msg.get("value")
+    if not is_int(value) or not 0 <= value <= 100:
+        raise ProtocolError("INVALID_VALUE", "value 0-100 arasında bir tam sayı olmalı")
+    STATE.set_level(kind, channel, value)
+    return {"status": "ok", "cmd": "set_level", "type": kind,
+            "channel": channel, "value": value}
+
+
+def handle_set_mute(msg):
+    channel = get_channel(msg)
+    mute = msg.get("mute")
+    if not isinstance(mute, bool):
+        raise ProtocolError("INVALID_VALUE", "mute true veya false olmalı")
+    STATE.set_mute(channel, mute)
+    return {"status": "ok", "cmd": "set_mute", "channel": channel, "mute": mute}
+
+
+def handle_get_state(msg):
+    reply = {"status": "ok", "cmd": "get_state"}
+    reply.update(STATE.snapshot())
+    return reply
+
+
+# Komut adı -> işleyici fonksiyon
+HANDLERS = {
+    "ping": handle_ping,
+    "set_level": handle_set_level,
+    "set_mute": handle_set_mute,
+    "get_state": handle_get_state,
+}
+
+
+def error_reply(code, message):
+    return {"status": "error", "code": code, "message": message}
+
+
+def process_line(line):
+    """Bir satırı işler ve istemciye gönderilecek yanıt sözlüğünü döndürür."""
+    if line is None:
+        return error_reply("INVALID_JSON", "satır 1 KB sınırını aşıyor")
+    try:
+        msg = json.loads(line.decode("utf-8"))
+    except (ValueError, RecursionError):
+        # UnicodeDecodeError ve JSONDecodeError, ValueError'ın alt sınıflarıdır.
+        # Boş satır da burada yakalanır.
+        return error_reply("INVALID_JSON", "geçerli bir JSON değil")
+    if not isinstance(msg, dict):
+        return error_reply("INVALID_JSON", "JSON bir nesne olmalı")
+    cmd = msg.get("cmd")
+    handler = HANDLERS.get(cmd) if isinstance(cmd, str) else None
+    if handler is None:
+        return error_reply("UNKNOWN_CMD", "bilinmeyen komut")
+    try:
+        return handler(msg)
+    except ProtocolError as err:
+        return error_reply(err.code, err.message)
+
+
 def log(msg):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
@@ -66,16 +190,12 @@ def handle_client(conn, addr):
             if not data:  # istemci bağlantıyı kapattı
                 break
             for line in buf.feed(data):
-                # GEÇİCİ: komut işleme 1.4'te gelecek. Şimdilik sadece yankılıyoruz.
-                if line is None:
-                    reply = {"status": "error", "code": "INVALID_JSON",
-                             "message": "satır çok uzun"}
-                    log(f"{addr[1]} <- (1 KB'ı aşan satır)")
-                else:
-                    log(f"{addr[1]} <- {line.decode('utf-8', 'replace')}")
-                    reply = {"status": "ok", "echo": line.decode("utf-8", "replace")}
+                shown = "(1 KB'ı aşan satır)" if line is None else line.decode("utf-8", "replace")
+                log(f"{addr[1]} <- {shown}")
+                out = json.dumps(process_line(line), ensure_ascii=False)
+                log(f"{addr[1]} -> {out}")
                 try:
-                    conn.sendall((json.dumps(reply) + "\n").encode("utf-8"))
+                    conn.sendall((out + "\n").encode("utf-8"))
                 except OSError:
                     return
     log(f"Ayrıldı: {addr[0]}:{addr[1]}")
