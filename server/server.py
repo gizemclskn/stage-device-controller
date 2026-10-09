@@ -3,6 +3,7 @@
 import json
 import socket
 import threading
+import traceback
 from datetime import datetime
 
 HOST = "0.0.0.0"
@@ -201,6 +202,14 @@ def handle_client(conn, addr):
     log(f"Ayrıldı: {addr[0]}:{addr[1]}")
 
 
+def serve_client(conn, addr):
+    """handle_client'i sarar: beklenmeyen bir hata yalnızca bu istemciyi düşürür."""
+    try:
+        handle_client(conn, addr)
+    except Exception:
+        log(f"HATA: {addr[1]} istemcisinde beklenmeyen hata:\n{traceback.format_exc()}")
+
+
 def main():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -209,7 +218,7 @@ def main():
     log(f"Dinleniyor: {HOST}:{PORT}")
     while True:
         conn, addr = server.accept()
-        threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+        threading.Thread(target=serve_client, args=(conn, addr), daemon=True).start()
 
 
 if __name__ == "__main__":
