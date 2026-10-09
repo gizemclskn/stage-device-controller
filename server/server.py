@@ -1,15 +1,22 @@
 """stage-device-controller: sahne cihazı simülatörü (TCP sunucusu)."""
 
+import argparse
 import json
 import socket
+import sys
 import threading
 import traceback
 from datetime import datetime
 
-HOST = "0.0.0.0"
-PORT = 5000
-MAX_LINE = 1024  # satır başına en fazla 1 KB
-CHANNELS = 8     # ışık ve ses için kanal sayısı (kanallar 1-8)
+DEFAULT_HOST = "0.0.0.0"
+DEFAULT_PORT = 5000
+DEFAULT_IDLE_TIMEOUT = 300.0  # saniye; bu sürede hiçbir şey göndermeyen istemci kapatılır
+MAX_LINE = 1024               # satır başına en fazla 1 KB
+CHANNELS = 8                  # ışık ve ses için kanal sayısı (kanallar 1-8)
+ACCEPT_POLL = 1.0             # accept() bu aralıkla uyanır (Windows'ta Ctrl+C için gerekli)
+
+CLIENTS = set()               # bağlı istemci soketleri (kapanışta hepsini kapatmak için)
+CLIENTS_LOCK = threading.Lock()
 
 
 class LineBuffer:
@@ -178,14 +185,18 @@ def log(msg):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
-def handle_client(conn, addr):
+def handle_client(conn, addr, idle_timeout):
     """Tek bir istemciyi kendi thread'inde sunar."""
     log(f"Bağlandı: {addr[0]}:{addr[1]}")
+    conn.settimeout(idle_timeout)  # bu sürede veri gelmezse recv() zaman aşımına düşer
     buf = LineBuffer(MAX_LINE)
     with conn:
         while True:
             try:
                 data = conn.recv(4096)
+            except socket.timeout:
+                log(f"Boşta kalma zaman aşımı ({idle_timeout:g} sn): {addr[0]}:{addr[1]}")
+                break
             except OSError:
                 break
             if not data:  # istemci bağlantıyı kapattı
@@ -202,24 +213,98 @@ def handle_client(conn, addr):
     log(f"Ayrıldı: {addr[0]}:{addr[1]}")
 
 
-def serve_client(conn, addr):
+def serve_client(conn, addr, idle_timeout):
     """handle_client'i sarar: beklenmeyen bir hata yalnızca bu istemciyi düşürür."""
+    with CLIENTS_LOCK:
+        CLIENTS.add(conn)
     try:
-        handle_client(conn, addr)
+        handle_client(conn, addr, idle_timeout)
     except Exception:
         log(f"HATA: {addr[1]} istemcisinde beklenmeyen hata:\n{traceback.format_exc()}")
+    finally:
+        with CLIENTS_LOCK:
+            CLIENTS.discard(conn)
 
 
-def main():
+def close_all_clients():
+    """Sunucu kapanırken bağlı tüm istemcilerin bağlantısını keser."""
+    with CLIENTS_LOCK:
+        conns = list(CLIENTS)
+    for conn in conns:
+        try:
+            conn.shutdown(socket.SHUT_RDWR)  # istemci thread'inin recv()'i sona erer
+        except OSError:
+            pass
+
+
+def port_number(text):
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz port: {text!r}")
+    if not 1 <= value <= 65535:
+        raise argparse.ArgumentTypeError("port 1-65535 arasında olmalı")
+    return value
+
+
+def timeout_seconds(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz süre: {text!r}")
+    if not 0 < value <= 86400:
+        raise argparse.ArgumentTypeError("süre 0 ile 86400 saniye arasında olmalı")
+    return value
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="stage-device-controller: sahne cihazı simülatörü (TCP sunucusu)")
+    parser.add_argument("--host", default=DEFAULT_HOST,
+                        help=f"dinlenecek adres (varsayılan: {DEFAULT_HOST})")
+    parser.add_argument("--port", type=port_number, default=DEFAULT_PORT,
+                        help=f"dinlenecek port, 1-65535 (varsayılan: {DEFAULT_PORT})")
+    parser.add_argument("--idle-timeout", type=timeout_seconds, default=DEFAULT_IDLE_TIMEOUT,
+                        metavar="SANIYE",
+                        help=f"bu kadar süre sessiz kalan istemci kapatılır (varsayılan: {DEFAULT_IDLE_TIMEOUT:g})")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        # Windows: SO_REUSEADDR, aynı porta ikinci bir sunucunun bağlanmasına izin verir.
+        # Bunu istemiyoruz, o yüzden port özel olarak kilitlenir.
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        server.bind((args.host, args.port))
+    except OSError as err:
+        log(f"HATA: {args.host}:{args.port} adresine bağlanılamadı: {err}")
+        server.close()
+        return 1
     server.listen()
-    log(f"Dinleniyor: {HOST}:{PORT}")
-    while True:
-        conn, addr = server.accept()
-        threading.Thread(target=serve_client, args=(conn, addr), daemon=True).start()
+    server.settimeout(ACCEPT_POLL)
+    log(f"Dinleniyor: {args.host}:{args.port} (boşta kalma zaman aşımı: {args.idle_timeout:g} sn)")
+    try:
+        while True:
+            try:
+                conn, addr = server.accept()
+            except socket.timeout:
+                continue  # her saniye uyanır, böylece Ctrl+C işlenebilir
+            threading.Thread(target=serve_client,
+                             args=(conn, addr, args.idle_timeout),
+                             daemon=True).start()
+    except KeyboardInterrupt:
+        log("Kapatılıyor...")
+    finally:
+        server.close()
+        close_all_clients()
+    log("Sunucu kapandı.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
