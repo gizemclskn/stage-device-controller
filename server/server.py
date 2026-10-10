@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import signal
 import socket
 import sys
 import threading
@@ -13,10 +14,11 @@ DEFAULT_PORT = 5000
 DEFAULT_IDLE_TIMEOUT = 300.0  # saniye; bu sürede hiçbir şey göndermeyen istemci kapatılır
 MAX_LINE = 1024               # satır başına en fazla 1 KB
 CHANNELS = 8                  # ışık ve ses için kanal sayısı (kanallar 1-8)
-ACCEPT_POLL = 1.0             # accept() bu aralıkla uyanır (Windows'ta Ctrl+C için gerekli)
+ACCEPT_POLL = 1.0             # accept() bu aralıkla uyanır ve kapanış bayrağını kontrol eder
 
 CLIENTS = set()               # bağlı istemci soketleri (kapanışta hepsini kapatmak için)
 CLIENTS_LOCK = threading.Lock()
+STOP = threading.Event()      # Ctrl+C gelince kaldırılır, ana döngü bunu görüp kapanır
 
 
 class LineBuffer:
@@ -237,6 +239,11 @@ def close_all_clients():
             pass
 
 
+def request_stop(signum, frame):
+    """Ctrl+C geldiğinde yalnızca bayrağı kaldırır, asıl kapanışı ana döngü yapar."""
+    STOP.set()
+
+
 def port_number(text):
     try:
         value = int(text)
@@ -287,19 +294,19 @@ def main(argv=None):
         return 1
     server.listen()
     server.settimeout(ACCEPT_POLL)
+    signal.signal(signal.SIGINT, request_stop)  # Ctrl+C artık istisna fırlatmaz, bayrak kaldırır
     log(f"Dinleniyor: {args.host}:{args.port} (boşta kalma zaman aşımı: {args.idle_timeout:g} sn)")
     try:
-        while True:
+        while not STOP.is_set():
             try:
                 conn, addr = server.accept()
             except socket.timeout:
-                continue  # her saniye uyanır, böylece Ctrl+C işlenebilir
+                continue  # her saniye uyanır ve kapanış bayrağını kontrol eder
             threading.Thread(target=serve_client,
                              args=(conn, addr, args.idle_timeout),
                              daemon=True).start()
-    except KeyboardInterrupt:
-        log("Kapatılıyor...")
     finally:
+        log("Kapatılıyor...")
         server.close()
         close_all_clients()
     log("Sunucu kapandı.")
