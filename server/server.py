@@ -1,0 +1,372 @@
+"""stage-device-controller: sahne cihazı simülatörü (TCP sunucusu)."""
+
+import argparse
+import json
+import random
+import signal
+import socket
+import sys
+import threading
+import time
+import traceback
+from datetime import datetime
+
+DEFAULT_HOST = "0.0.0.0"
+DEFAULT_PORT = 5000
+DEFAULT_IDLE_TIMEOUT = 300.0  # saniye; bu sürede hiçbir şey göndermeyen istemci kapatılır
+MAX_LINE = 1024               # satır başına en fazla 1 KB
+CHANNELS = 8                  # ışık ve ses için kanal sayısı (kanallar 1-8)
+ACCEPT_POLL = 1.0             # accept() bu aralıkla uyanır ve kapanış bayrağını kontrol eder
+
+CLIENTS = set()               # bağlı istemci soketleri (kapanışta hepsini kapatmak için)
+CLIENTS_LOCK = threading.Lock()
+STOP = threading.Event()      # Ctrl+C gelince kaldırılır, ana döngü bunu görüp kapanır
+
+
+class LineBuffer:
+    """Gelen baytları satırlara ayırır.
+
+    TCP bir akıştır: bir satır birkaç parçada gelebilir, bir paketin
+    içinde birden fazla satır olabilir. Bu sınıf ikisini de doğru yönetir.
+    feed() her tam satır için bytes, 1 KB'ı aşan satır için None döndürür.
+    """
+
+    def __init__(self, max_len):
+        self.max_len = max_len
+        self._buf = bytearray()
+        self._discarding = False  # aşırı uzun satırın kalanını atıyor muyuz
+
+    def feed(self, data):
+        out = []
+        self._buf.extend(data)
+        while True:
+            idx = self._buf.find(b"\n")
+            if idx == -1:
+                # Satır henüz bitmedi. Limit aşıldıysa bir kez bildir, kalanı at.
+                if len(self._buf) > self.max_len and not self._discarding:
+                    out.append(None)
+                    self._discarding = True
+                if self._discarding:
+                    self._buf.clear()
+                break
+            line = bytes(self._buf[:idx])
+            del self._buf[:idx + 1]
+            if self._discarding:
+                # Aşırı uzun satırın kuyruğu, zaten bildirildi.
+                self._discarding = False
+                continue
+            if len(line) > self.max_len:
+                out.append(None)
+            else:
+                out.append(line.rstrip(b"\r"))
+        return out
+
+
+class ProtocolError(Exception):
+    """İstemciye hata yanıtı olarak dönecek protokol hatası."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class FaultConfig:
+    """Hata enjeksiyonu ayarları: yapay gecikme ve yanıt düşürme.
+
+    Amaç, istemcinin zaman aşımı ve yeniden bağlanma davranışını
+    bilerek bozuk bir sunucuyla sınayabilmek.
+    """
+
+    def __init__(self, latency_ms=0.0, drop_rate=0.0):
+        self.latency_ms = latency_ms  # her yanıta eklenen gecikme (milisaniye)
+        self.drop_rate = drop_rate    # yanıtın hiç gönderilmeme olasılığı (0-1)
+
+    @property
+    def enabled(self):
+        return self.latency_ms > 0 or self.drop_rate > 0
+
+    def should_drop(self):
+        return self.drop_rate > 0 and random.random() < self.drop_rate
+
+
+class DeviceState:
+    """Cihazın durumu: 8 ışık ve 8 ses kanalı (seviye + mute).
+
+    Birden fazla istemci thread'i aynı anda erişebilir, bu yüzden
+    her okuma ve yazma Lock ile korunur.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._light = [0] * CHANNELS
+        self._audio = [{"level": 0, "mute": False} for _ in range(CHANNELS)]
+
+    def set_level(self, kind, channel, value):
+        with self._lock:
+            if kind == "light":
+                self._light[channel - 1] = value
+            else:
+                self._audio[channel - 1]["level"] = value
+
+    def set_mute(self, channel, mute):
+        with self._lock:
+            self._audio[channel - 1]["mute"] = mute
+
+    def snapshot(self):
+        """Durumun kopyasını döndürür (kilit dışında güvenle kullanılabilir)."""
+        with self._lock:
+            return {
+                "light": list(self._light),
+                "audio": [dict(a) for a in self._audio],
+            }
+
+
+STATE = DeviceState()  # tüm istemcilerin paylaştığı tek cihaz durumu
+
+
+def is_int(value):
+    # bool, Python'da int'in alt sınıfıdır. true/false'u sayı saymamak için ayrıca eleriz.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def get_channel(msg):
+    channel = msg.get("channel")
+    if not is_int(channel) or not 1 <= channel <= CHANNELS:
+        raise ProtocolError("INVALID_CHANNEL", "kanal 1-8 arasında bir tam sayı olmalı")
+    return channel
+
+
+def handle_ping(msg):
+    return {"status": "ok", "cmd": "pong"}
+
+
+def handle_set_level(msg):
+    kind = msg.get("type")
+    if kind not in ("light", "audio"):
+        raise ProtocolError("INVALID_VALUE", "type 'light' veya 'audio' olmalı")
+    channel = get_channel(msg)
+    value = msg.get("value")
+    if not is_int(value) or not 0 <= value <= 100:
+        raise ProtocolError("INVALID_VALUE", "value 0-100 arasında bir tam sayı olmalı")
+    STATE.set_level(kind, channel, value)
+    return {"status": "ok", "cmd": "set_level", "type": kind,
+            "channel": channel, "value": value}
+
+
+def handle_set_mute(msg):
+    channel = get_channel(msg)
+    mute = msg.get("mute")
+    if not isinstance(mute, bool):
+        raise ProtocolError("INVALID_VALUE", "mute true veya false olmalı")
+    STATE.set_mute(channel, mute)
+    return {"status": "ok", "cmd": "set_mute", "channel": channel, "mute": mute}
+
+
+def handle_get_state(msg):
+    reply = {"status": "ok", "cmd": "get_state"}
+    reply.update(STATE.snapshot())
+    return reply
+
+
+# Komut adı -> işleyici fonksiyon
+HANDLERS = {
+    "ping": handle_ping,
+    "set_level": handle_set_level,
+    "set_mute": handle_set_mute,
+    "get_state": handle_get_state,
+}
+
+
+def error_reply(code, message):
+    return {"status": "error", "code": code, "message": message}
+
+
+def process_line(line):
+    """Bir satırı işler ve istemciye gönderilecek yanıt sözlüğünü döndürür."""
+    if line is None:
+        return error_reply("INVALID_JSON", "satır 1 KB sınırını aşıyor")
+    try:
+        msg = json.loads(line.decode("utf-8"))
+    except (ValueError, RecursionError):
+        # UnicodeDecodeError ve JSONDecodeError, ValueError'ın alt sınıflarıdır.
+        # Boş satır da burada yakalanır.
+        return error_reply("INVALID_JSON", "geçerli bir JSON değil")
+    if not isinstance(msg, dict):
+        return error_reply("INVALID_JSON", "JSON bir nesne olmalı")
+    cmd = msg.get("cmd")
+    handler = HANDLERS.get(cmd) if isinstance(cmd, str) else None
+    if handler is None:
+        return error_reply("UNKNOWN_CMD", "bilinmeyen komut")
+    try:
+        return handler(msg)
+    except ProtocolError as err:
+        return error_reply(err.code, err.message)
+
+
+def log(msg):
+    print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
+
+
+def handle_client(conn, addr, idle_timeout, faults):
+    """Tek bir istemciyi kendi thread'inde sunar."""
+    log(f"Bağlandı: {addr[0]}:{addr[1]}")
+    conn.settimeout(idle_timeout)  # bu sürede veri gelmezse recv() zaman aşımına düşer
+    buf = LineBuffer(MAX_LINE)
+    with conn:
+        while True:
+            try:
+                data = conn.recv(4096)
+            except socket.timeout:
+                log(f"Boşta kalma zaman aşımı ({idle_timeout:g} sn): {addr[0]}:{addr[1]}")
+                break
+            except OSError:
+                break
+            if not data:  # istemci bağlantıyı kapattı
+                break
+            for line in buf.feed(data):
+                shown = "(1 KB'ı aşan satır)" if line is None else line.decode("utf-8", "replace")
+                log(f"{addr[1]} <- {shown}")
+                out = json.dumps(process_line(line), ensure_ascii=False)
+                if faults.should_drop():
+                    # Komut işlendi (durum değişti) ama yanıt istemciye gönderilmiyor.
+                    log(f"{addr[1]} -> [hata enjeksiyonu: yanıt düşürüldü] {out}")
+                    continue
+                if faults.latency_ms > 0:
+                    time.sleep(faults.latency_ms / 1000)
+                log(f"{addr[1]} -> {out}")
+                try:
+                    conn.sendall((out + "\n").encode("utf-8"))
+                except OSError:
+                    return
+    log(f"Ayrıldı: {addr[0]}:{addr[1]}")
+
+
+def serve_client(conn, addr, idle_timeout, faults):
+    """handle_client'i sarar: beklenmeyen bir hata yalnızca bu istemciyi düşürür."""
+    with CLIENTS_LOCK:
+        CLIENTS.add(conn)
+    try:
+        handle_client(conn, addr, idle_timeout, faults)
+    except Exception:
+        log(f"HATA: {addr[1]} istemcisinde beklenmeyen hata:\n{traceback.format_exc()}")
+    finally:
+        with CLIENTS_LOCK:
+            CLIENTS.discard(conn)
+
+
+def close_all_clients():
+    """Sunucu kapanırken bağlı tüm istemcilerin bağlantısını keser."""
+    with CLIENTS_LOCK:
+        conns = list(CLIENTS)
+    for conn in conns:
+        try:
+            conn.shutdown(socket.SHUT_RDWR)  # istemci thread'inin recv()'i sona erer
+        except OSError:
+            pass
+
+
+def request_stop(signum, frame):
+    """Ctrl+C geldiğinde yalnızca bayrağı kaldırır, asıl kapanışı ana döngü yapar."""
+    STOP.set()
+
+
+def port_number(text):
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz port: {text!r}")
+    if not 1 <= value <= 65535:
+        raise argparse.ArgumentTypeError("port 1-65535 arasında olmalı")
+    return value
+
+
+def timeout_seconds(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz süre: {text!r}")
+    if not 0 < value <= 86400:
+        raise argparse.ArgumentTypeError("süre 0 ile 86400 saniye arasında olmalı")
+    return value
+
+
+def latency_value(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz gecikme: {text!r}")
+    if not 0 <= value <= 60000:
+        raise argparse.ArgumentTypeError("gecikme 0 ile 60000 milisaniye arasında olmalı")
+    return value
+
+
+def drop_rate_value(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz oran: {text!r}")
+    if not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError("oran 0 ile 1 arasında olmalı")
+    return value
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="stage-device-controller: sahne cihazı simülatörü (TCP sunucusu)")
+    parser.add_argument("--host", default=DEFAULT_HOST,
+                        help=f"dinlenecek adres (varsayılan: {DEFAULT_HOST})")
+    parser.add_argument("--port", type=port_number, default=DEFAULT_PORT,
+                        help=f"dinlenecek port, 1-65535 (varsayılan: {DEFAULT_PORT})")
+    parser.add_argument("--idle-timeout", type=timeout_seconds, default=DEFAULT_IDLE_TIMEOUT,
+                        metavar="SANIYE",
+                        help=f"bu kadar süre sessiz kalan istemci kapatılır (varsayılan: {DEFAULT_IDLE_TIMEOUT:g})")
+    parser.add_argument("--latency-ms", type=latency_value, default=0.0, metavar="MS",
+                        help="hata enjeksiyonu: her yanıtı bu kadar milisaniye geciktirir (varsayılan: 0)")
+    parser.add_argument("--drop-rate", type=drop_rate_value, default=0.0, metavar="ORAN",
+                        help="hata enjeksiyonu: yanıtların bu oranda (0-1) hiç gönderilmemesi (varsayılan: 0)")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    faults = FaultConfig(args.latency_ms, args.drop_rate)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        # Windows: SO_REUSEADDR, aynı porta ikinci bir sunucunun bağlanmasına izin verir.
+        # Bunu istemiyoruz, o yüzden port özel olarak kilitlenir.
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        server.bind((args.host, args.port))
+    except OSError as err:
+        log(f"HATA: {args.host}:{args.port} adresine bağlanılamadı: {err}")
+        server.close()
+        return 1
+    server.listen()
+    server.settimeout(ACCEPT_POLL)
+    signal.signal(signal.SIGINT, request_stop)  # Ctrl+C artık istisna fırlatmaz, bayrak kaldırır
+    log(f"Dinleniyor: {args.host}:{args.port} (boşta kalma zaman aşımı: {args.idle_timeout:g} sn)")
+    if faults.enabled:
+        log(f"UYARI: hata enjeksiyonu açık (gecikme: {faults.latency_ms:g} ms, "
+            f"yanıt düşürme oranı: {faults.drop_rate:g})")
+    try:
+        while not STOP.is_set():
+            try:
+                conn, addr = server.accept()
+            except socket.timeout:
+                continue  # her saniye uyanır ve kapanış bayrağını kontrol eder
+            threading.Thread(target=serve_client,
+                             args=(conn, addr, args.idle_timeout, faults),
+                             daemon=True).start()
+    finally:
+        log("Kapatılıyor...")
+        server.close()
+        close_all_clients()
+    log("Sunucu kapandı.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
