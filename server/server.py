@@ -2,10 +2,12 @@
 
 import argparse
 import json
+import random
 import signal
 import socket
 import sys
 import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -67,6 +69,25 @@ class ProtocolError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+class FaultConfig:
+    """Hata enjeksiyonu ayarları: yapay gecikme ve yanıt düşürme.
+
+    Amaç, istemcinin zaman aşımı ve yeniden bağlanma davranışını
+    bilerek bozuk bir sunucuyla sınayabilmek.
+    """
+
+    def __init__(self, latency_ms=0.0, drop_rate=0.0):
+        self.latency_ms = latency_ms  # her yanıta eklenen gecikme (milisaniye)
+        self.drop_rate = drop_rate    # yanıtın hiç gönderilmeme olasılığı (0-1)
+
+    @property
+    def enabled(self):
+        return self.latency_ms > 0 or self.drop_rate > 0
+
+    def should_drop(self):
+        return self.drop_rate > 0 and random.random() < self.drop_rate
 
 
 class DeviceState:
@@ -187,7 +208,7 @@ def log(msg):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
-def handle_client(conn, addr, idle_timeout):
+def handle_client(conn, addr, idle_timeout, faults):
     """Tek bir istemciyi kendi thread'inde sunar."""
     log(f"Bağlandı: {addr[0]}:{addr[1]}")
     conn.settimeout(idle_timeout)  # bu sürede veri gelmezse recv() zaman aşımına düşer
@@ -207,6 +228,12 @@ def handle_client(conn, addr, idle_timeout):
                 shown = "(1 KB'ı aşan satır)" if line is None else line.decode("utf-8", "replace")
                 log(f"{addr[1]} <- {shown}")
                 out = json.dumps(process_line(line), ensure_ascii=False)
+                if faults.should_drop():
+                    # Komut işlendi (durum değişti) ama yanıt istemciye gönderilmiyor.
+                    log(f"{addr[1]} -> [hata enjeksiyonu: yanıt düşürüldü] {out}")
+                    continue
+                if faults.latency_ms > 0:
+                    time.sleep(faults.latency_ms / 1000)
                 log(f"{addr[1]} -> {out}")
                 try:
                     conn.sendall((out + "\n").encode("utf-8"))
@@ -215,12 +242,12 @@ def handle_client(conn, addr, idle_timeout):
     log(f"Ayrıldı: {addr[0]}:{addr[1]}")
 
 
-def serve_client(conn, addr, idle_timeout):
+def serve_client(conn, addr, idle_timeout, faults):
     """handle_client'i sarar: beklenmeyen bir hata yalnızca bu istemciyi düşürür."""
     with CLIENTS_LOCK:
         CLIENTS.add(conn)
     try:
-        handle_client(conn, addr, idle_timeout)
+        handle_client(conn, addr, idle_timeout, faults)
     except Exception:
         log(f"HATA: {addr[1]} istemcisinde beklenmeyen hata:\n{traceback.format_exc()}")
     finally:
@@ -264,6 +291,26 @@ def timeout_seconds(text):
     return value
 
 
+def latency_value(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz gecikme: {text!r}")
+    if not 0 <= value <= 60000:
+        raise argparse.ArgumentTypeError("gecikme 0 ile 60000 milisaniye arasında olmalı")
+    return value
+
+
+def drop_rate_value(text):
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"geçersiz oran: {text!r}")
+    if not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError("oran 0 ile 1 arasında olmalı")
+    return value
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="stage-device-controller: sahne cihazı simülatörü (TCP sunucusu)")
@@ -274,11 +321,16 @@ def parse_args(argv=None):
     parser.add_argument("--idle-timeout", type=timeout_seconds, default=DEFAULT_IDLE_TIMEOUT,
                         metavar="SANIYE",
                         help=f"bu kadar süre sessiz kalan istemci kapatılır (varsayılan: {DEFAULT_IDLE_TIMEOUT:g})")
+    parser.add_argument("--latency-ms", type=latency_value, default=0.0, metavar="MS",
+                        help="hata enjeksiyonu: her yanıtı bu kadar milisaniye geciktirir (varsayılan: 0)")
+    parser.add_argument("--drop-rate", type=drop_rate_value, default=0.0, metavar="ORAN",
+                        help="hata enjeksiyonu: yanıtların bu oranda (0-1) hiç gönderilmemesi (varsayılan: 0)")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
+    faults = FaultConfig(args.latency_ms, args.drop_rate)
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
         # Windows: SO_REUSEADDR, aynı porta ikinci bir sunucunun bağlanmasına izin verir.
@@ -296,6 +348,9 @@ def main(argv=None):
     server.settimeout(ACCEPT_POLL)
     signal.signal(signal.SIGINT, request_stop)  # Ctrl+C artık istisna fırlatmaz, bayrak kaldırır
     log(f"Dinleniyor: {args.host}:{args.port} (boşta kalma zaman aşımı: {args.idle_timeout:g} sn)")
+    if faults.enabled:
+        log(f"UYARI: hata enjeksiyonu açık (gecikme: {faults.latency_ms:g} ms, "
+            f"yanıt düşürme oranı: {faults.drop_rate:g})")
     try:
         while not STOP.is_set():
             try:
@@ -303,7 +358,7 @@ def main(argv=None):
             except socket.timeout:
                 continue  # her saniye uyanır ve kapanış bayrağını kontrol eder
             threading.Thread(target=serve_client,
-                             args=(conn, addr, args.idle_timeout),
+                             args=(conn, addr, args.idle_timeout, faults),
                              daemon=True).start()
     finally:
         log("Kapatılıyor...")
