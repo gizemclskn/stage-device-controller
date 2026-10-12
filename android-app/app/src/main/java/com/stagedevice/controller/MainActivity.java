@@ -43,8 +43,8 @@ public class MainActivity extends AppCompatActivity {
 
         setStatus(getString(R.string.status_disconnected), COLOR_DISCONNECTED);
 
+        buttonConnect.setOnClickListener(view -> onConnectClicked());
         // Geçici: gerçek bağlantı kodu Aşama 3'te yazılacak
-        buttonConnect.setOnClickListener(view -> showNotImplemented());
         buttonDisconnect.setOnClickListener(view -> showNotImplemented());
     }
 
@@ -52,6 +52,58 @@ public class MainActivity extends AppCompatActivity {
     private void setStatus(String text, int color) {
         textStatus.setText("● " + text);
         textStatus.setTextColor(color);
+    }
+
+    private void onConnectClicked() {
+        if (!validateInputs()) {
+            return; // hata mesajları alanlarda gösterildi, bağlantı denenmez
+        }
+        String ip = editIp.getText().toString().trim();
+        int port = InputValidator.parsePort(editPort.getText().toString());
+        // Geçici: gerçek bağlantı kodu Aşama 3'te yazılacak
+        Toast.makeText(this, getString(R.string.toast_inputs_valid, ip, port),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** IP ve port alanlarını doğrular. Hata varsa ilgili alanda kırmızı uyarı gösterir. */
+    private boolean validateInputs() {
+        String ipError = ipErrorMessage(InputValidator.validateIp(editIp.getText().toString()));
+        String portError = portErrorMessage(
+                InputValidator.validatePort(editPort.getText().toString()));
+
+        editIp.setError(ipError);     // null verilirse eski uyarı temizlenir
+        editPort.setError(portError);
+
+        if (ipError != null) {
+            editIp.requestFocus();
+        } else if (portError != null) {
+            editPort.requestFocus();
+        }
+        return ipError == null && portError == null;
+    }
+
+    private String ipErrorMessage(InputValidator.IpResult result) {
+        switch (result) {
+            case EMPTY:
+                return getString(R.string.error_ip_empty);
+            case INVALID:
+                return getString(R.string.error_ip_invalid);
+            default:
+                return null;
+        }
+    }
+
+    private String portErrorMessage(InputValidator.PortResult result) {
+        switch (result) {
+            case EMPTY:
+                return getString(R.string.error_port_empty);
+            case INVALID:
+                return getString(R.string.error_port_invalid);
+            case OUT_OF_RANGE:
+                return getString(R.string.error_port_range);
+            default:
+                return null;
+        }
     }
 
     private void showNotImplemented() {

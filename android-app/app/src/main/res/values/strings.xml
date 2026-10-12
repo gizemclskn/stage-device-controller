@@ -9,4 +9,10 @@
     <string name="button_disconnect">Kes</string>
     <string name="status_disconnected">Bağlı değil</string>
     <string name="toast_not_implemented">Bağlantı kodu sonraki aşamada eklenecek</string>
+    <string name="error_ip_empty">IP adresi boş olamaz</string>
+    <string name="error_ip_invalid">Geçerli bir IP adresi yaz (örn. 10.0.2.2)</string>
+    <string name="error_port_empty">Port boş olamaz</string>
+    <string name="error_port_invalid">Port yalnızca rakamlardan oluşmalı</string>
+    <string name="error_port_range">Port 1 ile 65535 arasında olmalı</string>
+    <string name="toast_inputs_valid">Girişler geçerli: %1$s:%2$d (bağlantı kodu sonraki aşamada eklenecek)</string>
 </resources>
