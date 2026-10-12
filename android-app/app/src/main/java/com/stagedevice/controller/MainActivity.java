@@ -1,5 +1,6 @@
 package com.stagedevice.controller;
 
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.EditText;
@@ -16,6 +17,13 @@ public class MainActivity extends AppCompatActivity {
 
     // Durum göstergesinin rengi (kırmızı). Diğer durumların renkleri Aşama 3'te eklenecek.
     private static final int COLOR_DISCONNECTED = 0xFFC62828;
+
+    // Son kullanılan adresin saklandığı yer (SharedPreferences)
+    private static final String PREFS_NAME = "connection";
+    private static final String KEY_IP = "last_ip";
+    private static final String KEY_PORT = "last_port";
+    private static final String DEFAULT_IP = "10.0.2.2"; // emülatörden bilgisayara giden adres
+    private static final int DEFAULT_PORT = 5000;
 
     private EditText editIp;
     private EditText editPort;
@@ -41,11 +49,28 @@ public class MainActivity extends AppCompatActivity {
         buttonDisconnect = findViewById(R.id.buttonDisconnect);
         textStatus = findViewById(R.id.textStatus);
 
+        loadLastAddress();
         setStatus(getString(R.string.status_disconnected), COLOR_DISCONNECTED);
 
         buttonConnect.setOnClickListener(view -> onConnectClicked());
         // Geçici: gerçek bağlantı kodu Aşama 3'te yazılacak
         buttonDisconnect.setOnClickListener(view -> showNotImplemented());
+    }
+
+    /** Daha önce kaydedilmiş IP ve portu alanlara yazar. Kayıt yoksa varsayılanları kullanır. */
+    private void loadLastAddress() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        editIp.setText(prefs.getString(KEY_IP, DEFAULT_IP));
+        editPort.setText(String.valueOf(prefs.getInt(KEY_PORT, DEFAULT_PORT)));
+    }
+
+    /** Geçerli bir IP ve portu bir sonraki açılış için saklar. */
+    private void saveLastAddress(String ip, int port) {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(KEY_IP, ip)
+                .putInt(KEY_PORT, port)
+                .apply();
     }
 
     /** Durum satırını günceller: renkli bir nokta ve metin. */
@@ -60,6 +85,7 @@ public class MainActivity extends AppCompatActivity {
         }
         String ip = editIp.getText().toString().trim();
         int port = InputValidator.parsePort(editPort.getText().toString());
+        saveLastAddress(ip, port);
         // Geçici: gerçek bağlantı kodu Aşama 3'te yazılacak
         Toast.makeText(this, getString(R.string.toast_inputs_valid, ip, port),
                 Toast.LENGTH_SHORT).show();
