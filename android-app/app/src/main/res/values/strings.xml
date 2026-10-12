@@ -1,3 +1,12 @@
 <resources>
     <string name="app_name">Stage Device Controller</string>
+    <string name="label_ip">Sunucu IP adresi</string>
+    <string name="hint_ip">örn. 10.0.2.2</string>
+    <string name="label_port">Port</string>
+    <string name="hint_port">örn. 5000</string>
+    <string name="hint_address_help">Emülatörde bilgisayarına 10.0.2.2 adresiyle ulaşırsın. Gerçek telefonda bilgisayarının yerel IP adresini yaz.</string>
+    <string name="button_connect">Bağlan</string>
+    <string name="button_disconnect">Kes</string>
+    <string name="status_disconnected">Bağlı değil</string>
+    <string name="toast_not_implemented">Bağlantı kodu sonraki aşamada eklenecek</string>
 </resources>
