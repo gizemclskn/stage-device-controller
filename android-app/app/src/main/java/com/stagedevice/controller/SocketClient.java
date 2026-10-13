@@ -37,7 +37,8 @@ public class SocketClient {
         void onError(String message);
     }
 
-    private static final String TAG = "SocketClient";
+    // Tüm logcat etiketleri "SDC-" ile başlar: Logcat'te "tag:SDC-" filtresiyle hepsi görünür.
+    private static final String TAG = "SDC-SocketClient";
     private static final int CONNECT_TIMEOUT_MS = 3000;
     private static final int READ_TIMEOUT_MS = 3000;
     private static final int MAX_LINE_BYTES = 64 * 1024;
@@ -136,10 +137,12 @@ public class SocketClient {
         }
         try {
             long start = System.nanoTime();
+            Log.d(TAG, "-> " + line);
             out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
             out.flush();
             String reply = readLine();
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+            Log.d(TAG, "<- " + reply + " (" + elapsedMs + " ms)");
             postResponse(callback, reply, elapsedMs);
         } catch (IOException e) {
             Log.e(TAG, "İstek başarısız", e);

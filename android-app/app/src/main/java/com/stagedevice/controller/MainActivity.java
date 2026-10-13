@@ -2,6 +2,7 @@ package com.stagedevice.controller;
 
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -14,6 +15,8 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "SDC-MainActivity";
 
     // Durum göstergesinin renkleri
     private static final int COLOR_DISCONNECTED = 0xFFC62828; // kırmızı
@@ -31,9 +34,11 @@ public class MainActivity extends AppCompatActivity {
     private EditText editPort;
     private Button buttonConnect;
     private Button buttonDisconnect;
+    private Button buttonPing;
     private TextView textStatus;
+    private TextView textPing;
 
-    // Şimdilik ekranla birlikte yaşıyor. Ekran dönünce yok olur, 3.7'de düzelteceğiz.
+    // Uygulama sürecinde yaşar (StageApp), bu yüzden ekran dönünce bağlantı kopmaz
     private SocketClient client;
 
     @Override
@@ -52,13 +57,16 @@ public class MainActivity extends AppCompatActivity {
         editPort = findViewById(R.id.editPort);
         buttonConnect = findViewById(R.id.buttonConnect);
         buttonDisconnect = findViewById(R.id.buttonDisconnect);
+        buttonPing = findViewById(R.id.buttonPing);
         textStatus = findViewById(R.id.textStatus);
+        textPing = findViewById(R.id.textPing);
 
         loadLastAddress();
 
-        client = new SocketClient();
+        client = ((StageApp) getApplication()).getClient();
         buttonConnect.setOnClickListener(view -> onConnectClicked());
         buttonDisconnect.setOnClickListener(view -> client.disconnect());
+        buttonPing.setOnClickListener(view -> onPingClicked());
     }
 
     @Override
@@ -77,7 +85,11 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        client.shutdown();
+        // Ekran dönerken isFinishing() false'tur, bağlantı korunur.
+        // Kullanıcı uygulamadan çıkarsa bağlantıyı kapat.
+        if (isFinishing()) {
+            client.disconnect();
+        }
         super.onDestroy();
     }
 
@@ -110,7 +122,54 @@ public class MainActivity extends AppCompatActivity {
         String ip = editIp.getText().toString().trim();
         int port = InputValidator.parsePort(editPort.getText().toString());
         saveLastAddress(ip, port);
+        Log.d(TAG, "Bağlan: " + ip + ":" + port);
         client.connect(ip, port);
+    }
+
+    private void onPingClicked() {
+        buttonPing.setEnabled(false);
+        textPing.setText(R.string.ping_waiting);
+        client.request(CommandBuilder.ping(), new SocketClient.ResponseCallback() {
+            @Override
+            public void onResponse(String line, long elapsedMs) {
+                if (isFinishing() || isDestroyed()) {
+                    return; // ekran bu arada kapanmış ya da yeniden oluşmuş
+                }
+                showPingResult(line, elapsedMs);
+            }
+
+            @Override
+            public void onError(String message) {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                Log.w(TAG, "Ping başarısız: " + message);
+                textPing.setText(getString(R.string.ping_error, message));
+                updatePingButton();
+            }
+        });
+    }
+
+    /** Ping yanıtını çözer ve sonucu (süre ya da hata) ekrana yazar. */
+    private void showPingResult(String line, long elapsedMs) {
+        try {
+            ResponseParser.Response response = ResponseParser.parse(line);
+            if (response.isOk() && "pong".equals(response.getCmd())) {
+                textPing.setText(getString(R.string.ping_result, elapsedMs));
+            } else if (!response.isOk()) {
+                textPing.setText(getString(R.string.ping_server_error, response.getErrorCode()));
+            } else {
+                textPing.setText(getString(R.string.ping_unexpected, line));
+            }
+        } catch (ResponseParser.ParseException e) {
+            Log.w(TAG, "Geçersiz ping yanıtı: " + line, e);
+            textPing.setText(getString(R.string.ping_invalid_response, e.getMessage()));
+        }
+        updatePingButton();
+    }
+
+    private void updatePingButton() {
+        buttonPing.setEnabled(client.getState() == ConnectionState.CONNECTED);
     }
 
     /** Bağlantı durumuna göre durum satırını, düğmeleri ve alanları ayarlar. */
@@ -138,6 +197,10 @@ public class MainActivity extends AppCompatActivity {
         buttonDisconnect.setEnabled(!idle);
         editIp.setEnabled(idle);
         editPort.setEnabled(idle);
+        updatePingButton();
+        if (state != ConnectionState.CONNECTED) {
+            textPing.setText(R.string.ping_idle);
+        }
 
         if (idle && detail != null) {
             Toast.makeText(this, getString(R.string.toast_connection_problem, detail),
