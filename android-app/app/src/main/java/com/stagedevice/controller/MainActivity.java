@@ -15,8 +15,10 @@ import androidx.core.view.WindowInsetsCompat;
 
 public class MainActivity extends AppCompatActivity {
 
-    // Durum göstergesinin rengi (kırmızı). Diğer durumların renkleri Aşama 3'te eklenecek.
-    private static final int COLOR_DISCONNECTED = 0xFFC62828;
+    // Durum göstergesinin renkleri
+    private static final int COLOR_DISCONNECTED = 0xFFC62828; // kırmızı
+    private static final int COLOR_BUSY = 0xFFEF6C00;         // turuncu
+    private static final int COLOR_CONNECTED = 0xFF2E7D32;    // yeşil
 
     // Son kullanılan adresin saklandığı yer (SharedPreferences)
     private static final String PREFS_NAME = "connection";
@@ -30,6 +32,9 @@ public class MainActivity extends AppCompatActivity {
     private Button buttonConnect;
     private Button buttonDisconnect;
     private TextView textStatus;
+
+    // Şimdilik ekranla birlikte yaşıyor. Ekran dönünce yok olur, 3.7'de düzelteceğiz.
+    private SocketClient client;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,11 +55,30 @@ public class MainActivity extends AppCompatActivity {
         textStatus = findViewById(R.id.textStatus);
 
         loadLastAddress();
-        setStatus(getString(R.string.status_disconnected), COLOR_DISCONNECTED);
 
+        client = new SocketClient();
         buttonConnect.setOnClickListener(view -> onConnectClicked());
-        // Geçici: gerçek bağlantı kodu Aşama 3'te yazılacak
-        buttonDisconnect.setOnClickListener(view -> showNotImplemented());
+        buttonDisconnect.setOnClickListener(view -> client.disconnect());
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // Ekran görünürken durum değişikliklerini dinle ve mevcut durumu hemen çiz
+        client.setListener(this::onConnectionStateChanged);
+        onConnectionStateChanged(client.getState(), null);
+    }
+
+    @Override
+    protected void onStop() {
+        client.setListener(null);
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        client.shutdown();
+        super.onDestroy();
     }
 
     /** Daha önce kaydedilmiş IP ve portu alanlara yazar. Kayıt yoksa varsayılanları kullanır. */
@@ -86,9 +110,39 @@ public class MainActivity extends AppCompatActivity {
         String ip = editIp.getText().toString().trim();
         int port = InputValidator.parsePort(editPort.getText().toString());
         saveLastAddress(ip, port);
-        // Geçici: gerçek bağlantı kodu Aşama 3'te yazılacak
-        Toast.makeText(this, getString(R.string.toast_inputs_valid, ip, port),
-                Toast.LENGTH_SHORT).show();
+        client.connect(ip, port);
+    }
+
+    /** Bağlantı durumuna göre durum satırını, düğmeleri ve alanları ayarlar. */
+    private void onConnectionStateChanged(ConnectionState state, String detail) {
+        switch (state) {
+            case CONNECTING:
+                setStatus(getString(R.string.status_connecting), COLOR_BUSY);
+                break;
+            case CONNECTED:
+                setStatus(getString(R.string.status_connected), COLOR_CONNECTED);
+                break;
+            case RECONNECTING:
+                setStatus(getString(R.string.status_reconnecting), COLOR_BUSY);
+                break;
+            case LOST:
+                setStatus(getString(R.string.status_lost), COLOR_DISCONNECTED);
+                break;
+            default: // DISCONNECTED
+                setStatus(getString(R.string.status_disconnected), COLOR_DISCONNECTED);
+                break;
+        }
+
+        boolean idle = state == ConnectionState.DISCONNECTED || state == ConnectionState.LOST;
+        buttonConnect.setEnabled(idle);
+        buttonDisconnect.setEnabled(!idle);
+        editIp.setEnabled(idle);
+        editPort.setEnabled(idle);
+
+        if (idle && detail != null) {
+            Toast.makeText(this, getString(R.string.toast_connection_problem, detail),
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     /** IP ve port alanlarını doğrular. Hata varsa ilgili alanda kırmızı uyarı gösterir. */
@@ -130,9 +184,5 @@ public class MainActivity extends AppCompatActivity {
             default:
                 return null;
         }
-    }
-
-    private void showNotImplemented() {
-        Toast.makeText(this, R.string.toast_not_implemented, Toast.LENGTH_SHORT).show();
     }
 }
