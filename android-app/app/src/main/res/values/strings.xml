@@ -14,6 +14,7 @@
     <string name="status_lost">Bağlantı koptu</string>
     <string name="status_reconnecting">Yeniden bağlanıyor...</string>
     <string name="toast_connection_problem">Bağlantı sorunu: %s</string>
+    <string name="toast_server_error">Sunucu hatası: %s</string>
     <string name="ping_idle">Ping: -</string>
     <string name="ping_waiting">Ping: bekleniyor...</string>
     <string name="ping_result">Ping: %d ms</string>
@@ -26,4 +27,9 @@
     <string name="error_port_empty">Port boş olamaz</string>
     <string name="error_port_invalid">Port yalnızca rakamlardan oluşmalı</string>
     <string name="error_port_range">Port 1 ile 65535 arasında olmalı</string>
+    <string name="tab_connection">Bağlantı</string>
+    <string name="tab_light">Işık</string>
+    <string name="tab_audio">Ses</string>
+    <string name="channel_label">Kanal %d</string>
+    <string name="mute_label">Mute</string>
 </resources>
