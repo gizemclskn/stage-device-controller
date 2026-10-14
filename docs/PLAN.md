@@ -186,12 +186,12 @@ Süreler tahminidir. Toplam: çekirdek (Aşama 0-9) yaklaşık **48-63 saat**, A
 **Bitti ölçütü:** Kaydırıcı sunucu konsolunda görünüyor, uygulamayı kapatıp açınca değerler sunucudan geri yükleniyor, yatay ve dikey düzen bozulmuyor.
 
 ### Aşama 5: Log ekranı (~3-4 sa) · `feature/log-screen`
-- [ ] 5.1 `LogEntry` modeli (zaman damgası, yön: SENT/RECEIVED, metin)
-- [ ] 5.2 Bellek içi log listesi (en fazla 500 kayıt, eskiler silinir)
-- [ ] 5.3 RecyclerView + adapter, gönderilen/alınan için farklı renk
-- [ ] 5.4 SocketClient'tan her mesajın loga düşmesi
-- [ ] 5.5 Temizle butonu, otomatik en alta kaydırma
-- [ ] 5.6 Log'u metin olarak paylaşma/kopyalama (destek senaryosu için)
+- [x] 5.1 `LogEntry` modeli (zaman damgası, yön: SENT/RECEIVED, metin)
+- [x] 5.2 Bellek içi log listesi (en fazla 500 kayıt, eskiler silinir)
+- [x] 5.3 RecyclerView + adapter, gönderilen/alınan için farklı renk
+- [x] 5.4 SocketClient'tan her mesajın loga düşmesi
+- [x] 5.5 Temizle butonu, otomatik en alta kaydırma
+- [x] 5.6 Log'u metin olarak paylaşma/kopyalama (destek senaryosu için)
 
 **Commit planı:**
 `Add LogEntry model and bounded log store` ·
@@ -370,4 +370,6 @@ Severity: low / medium / high
 
 Her aşamada bu sırayla ilerliyoruz: özet → tam kod (dosya yollarıyla) → çalıştırma/test → Git adımı → mülakat notu. "Tamam, çalıştı" ya da hata çıktısı gelmeden sonraki aşamaya geçilmez.
 
-**Şu anki konum:** Aşama 0-4 tamam (`v0.1.0` yayında). Aşama 4 `feature/controls` branch'inde bitti ve push edildi, `main`'e merge edilecek. Sıradaki: **Aşama 5 (Log ekranı)**, branch `feature/log-screen`.
+**Şu anki konum:** Aşama 0-5 tamam ve `main`'e merge edildi (`d081e22`, 14 Ekim 2026; `v0.1.0` yayında). Aşama 5 doğrulandı: 37/37 test geçti, elle deneme tablosu hepsi doğru. Sıradaki: **Aşama 6 (Dayanıklılık)**, branch `feature/resilience`. İlk adım: 6.1 bağlantı kopmasının algılanması.
+
+**Her mesajda hatırlatma:** Hangi aşamada, hangi adımda olduğumuz ve sıradaki adım her mesajın başında kısaca yazılır.

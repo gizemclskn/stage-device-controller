@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,6 +24,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * ağ işine ana thread'de izin vermez. Sonuçlar Handler ile ana thread'e döner,
  * böylece listener ve callback'lerden ekran güvenle güncellenebilir.
  * Giden ve gelen her satır ayrıca LogStore'a yazılır (Log ekranı için).
+ *
+ * Bağlantı beklenmedik biçimde koparsa (okuma/yazma hatası, sunucunun kapatması,
+ * okuma zaman aşımı) otomatik yeniden bağlanır: en fazla 5 deneme, 1-2-4-8-16 sn arayla.
+ * Deneme sayacı yalnızca bir istek gerçekten yanıtlanınca sıfırlanır; yalnızca TCP
+ * bağlantısının kurulması yetmez (yanıt vermeyen sunucuda sonsuz döngüyü önler).
+ * Kullanıcı Kes'e basarsa yeniden bağlanma durur.
  */
 public class SocketClient {
 
@@ -44,19 +51,39 @@ public class SocketClient {
     private static final int READ_TIMEOUT_MS = 3000;
     private static final int MAX_LINE_BYTES = 64 * 1024;
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    // Yeniden bağlanma denemeleri arasındaki bekleme (saniye). Dizi uzunluğu = deneme sayısı.
+    private static final int[] BACKOFF_SECONDS = {1, 2, 4, 8, 16};
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     // Her connect/disconnect/kopma yeni bir numara üretir. Eski numaralı bir işin
     // sonucu artık geçersizdir (örneğin bağlanırken Kes'e basılırsa).
     private final AtomicInteger generation = new AtomicInteger();
 
+    // Durum, numara ve deneme sayacı değişiklikleri bu kilit altında yapılır, böylece
+    // Kes ile kopma aynı anda gelse bile durum tutarlı kalır.
+    private final Object lock = new Object();
+
     // Log ekranının veri kaynağı. Yalnızca ana thread'de değiştirilir (bkz. logMessage).
     private final LogStore logStore;
+
+    // Executor, bağlantıyla birlikte yaşar: Kes'te ya da vazgeçilince kapatılır,
+    // bir sonraki bağlanmada yeniden oluşturulur (boşta thread kalmasın). "this" ile korunur.
+    private ExecutorService executor;
 
     private volatile Listener listener;
     private volatile ConnectionState state = ConnectionState.DISCONNECTED;
     private volatile Socket socket;
+
+    // Yeniden bağlanma için son kullanılan adres
+    private volatile String lastHost;
+    private volatile int lastPort;
+
+    // Son başarılı yanıttan beri planlanan yeniden bağlanma denemesi sayısı (lock ile korunur)
+    private int reconnectAttempts;
+
+    // Bekleyen yeniden bağlanma görevi (Kes'te iptal edilir)
+    private volatile Runnable pendingReconnect;
 
     // Yalnızca executor thread'inde kullanılır
     private InputStream in;
@@ -76,19 +103,33 @@ public class SocketClient {
 
     /** Sunucuya bağlanmayı dener. Zaten bağlıysa ya da bağlanıyorsa bir şey yapmaz. */
     public void connect(final String host, final int port) {
-        if (state != ConnectionState.DISCONNECTED && state != ConnectionState.LOST) {
-            return;
+        final int id;
+        synchronized (lock) {
+            if (state != ConnectionState.DISCONNECTED && state != ConnectionState.LOST) {
+                return;
+            }
+            lastHost = host;
+            lastPort = port;
+            reconnectAttempts = 0; // kullanıcı elle bağlanıyor: temiz başlangıç
+            id = generation.incrementAndGet();
+            setState(ConnectionState.CONNECTING, null);
         }
-        final int id = generation.incrementAndGet();
-        setState(ConnectionState.CONNECTING, null);
-        executor.execute(() -> doConnect(id, host, port));
+        getExecutor().execute(() -> doConnect(id, host, port));
     }
 
-    /** Bağlantıyı kapatır. Bağlanma ya da okuma sürüyorsa onu da hemen sonlandırır. */
+    /**
+     * Bağlantıyı kapatır. Bağlanma, okuma ya da yeniden bağlanma sürüyorsa hepsini
+     * sonlandırır ve arka plan thread'ini serbest bırakır.
+     */
     public void disconnect() {
-        generation.incrementAndGet(); // süren işlerin sonucu artık geçersiz
-        closeInBackground();
-        setState(ConnectionState.DISCONNECTED, null);
+        synchronized (lock) {
+            generation.incrementAndGet(); // süren işlerin sonucu artık geçersiz
+            reconnectAttempts = 0;
+            cancelPendingReconnect();
+            closeInBackground();
+            setState(ConnectionState.DISCONNECTED, null);
+        }
+        releaseExecutor();
     }
 
     /**
@@ -97,16 +138,45 @@ public class SocketClient {
      * geç gelen bir yanıt, sonraki komutun yanıtıyla karışmasın.
      */
     public void request(final String line, final ResponseCallback callback) {
+        if (state != ConnectionState.CONNECTED) {
+            postError(callback, "Bağlı değil");
+            return;
+        }
         final int id = generation.get();
-        executor.execute(() -> doRequest(id, line, callback));
+        getExecutor().execute(() -> doRequest(id, line, callback));
     }
 
     /** Uygulama kapanırken çağrılır: bağlantıyı ve arka plan thread'ini sonlandırır. */
     public void shutdown() {
-        generation.incrementAndGet();
-        listener = null;
-        closeInBackground();
-        executor.shutdownNow();
+        synchronized (lock) {
+            generation.incrementAndGet();
+            cancelPendingReconnect();
+            listener = null;
+            closeInBackground();
+        }
+        synchronized (this) {
+            if (executor != null) {
+                executor.shutdownNow();
+                executor = null;
+            }
+        }
+    }
+
+    // ---- Executor yönetimi ----
+
+    private synchronized ExecutorService getExecutor() {
+        if (executor == null || executor.isShutdown()) {
+            executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "sdc-network"));
+        }
+        return executor;
+    }
+
+    /** Kuyruktaki işler (numaraları eski olduğu için hemen biter) tamamlanır, thread kapanır. */
+    private synchronized void releaseExecutor() {
+        if (executor != null) {
+            executor.shutdown();
+            executor = null;
+        }
     }
 
     // ---- Executor thread'inde çalışan işler ----
@@ -115,26 +185,78 @@ public class SocketClient {
         if (id != generation.get()) {
             return; // sıradayken Kes'e basılmış
         }
+        try {
+            if (openConnection(id, host, port)) {
+                Log.d(TAG, "Bağlandı: " + host + ":" + port);
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "Bağlanılamadı: " + host + ":" + port, e);
+            boolean current;
+            synchronized (lock) {
+                current = id == generation.get();
+                if (current) {
+                    // İlk bağlanma başarısızsa otomatik denenmez: kullanıcı yanlış adres girmiş olabilir
+                    setState(ConnectionState.DISCONNECTED, "Bağlanılamadı: " + e.getMessage());
+                }
+            }
+            if (current) {
+                releaseExecutor();
+            }
+        }
+    }
+
+    /** Yeniden bağlanma denemesi. Başarısız olursa bir sonrakini planlar. */
+    private void doReconnect(int id, int attempt) {
+        if (id != generation.get()) {
+            return; // beklerken Kes'e basılmış
+        }
+        String host = lastHost;
+        int port = lastPort;
+        try {
+            if (openConnection(id, host, port)) {
+                Log.d(TAG, "Yeniden bağlandı (deneme " + attempt + "): " + host + ":" + port);
+            }
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "Yeniden bağlanma başarısız (deneme " + attempt + "): " + e.getMessage());
+            synchronized (lock) {
+                if (id == generation.get()) {
+                    scheduleReconnect();
+                }
+            }
+        }
+    }
+
+    /**
+     * Soketi açar ve CONNECTED durumuna geçer. Bu sırada Kes'e basılmışsa (numara eskimişse)
+     * soketi kapatıp false döner. Bağlantı hatasında soketi kapatıp istisnayı iletir.
+     */
+    private boolean openConnection(int id, String host, int port) throws IOException {
         Socket s = new Socket();
-        socket = s;
+        synchronized (lock) {
+            if (id != generation.get()) {
+                return false;
+            }
+            socket = s;
+        }
         try {
             s.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
             s.setSoTimeout(READ_TIMEOUT_MS);
             s.setTcpNoDelay(true);
-            if (id != generation.get()) {
-                closeQuietly(s); // bağlanırken Kes'e basılmış
-                return;
+            InputStream newIn = new BufferedInputStream(s.getInputStream());
+            OutputStream newOut = s.getOutputStream();
+            synchronized (lock) {
+                if (id != generation.get()) {
+                    closeQuietly(s); // bağlanırken Kes'e basılmış
+                    return false;
+                }
+                in = newIn;
+                out = newOut;
+                setState(ConnectionState.CONNECTED, null);
             }
-            in = new BufferedInputStream(s.getInputStream());
-            out = s.getOutputStream();
-            Log.d(TAG, "Bağlandı: " + host + ":" + port);
-            setState(ConnectionState.CONNECTED, null);
-        } catch (IOException e) {
+            return true;
+        } catch (IOException | RuntimeException e) {
             closeQuietly(s);
-            if (id == generation.get()) {
-                Log.e(TAG, "Bağlanılamadı: " + host + ":" + port, e);
-                setState(ConnectionState.DISCONNECTED, "Bağlanılamadı: " + e.getMessage());
-            }
+            throw e;
         }
     }
 
@@ -153,15 +275,77 @@ public class SocketClient {
             logMessage(LogEntry.Direction.RECEIVED, reply);
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             Log.d(TAG, "<- " + reply + " (" + elapsedMs + " ms)");
-            postResponse(callback, reply, elapsedMs);
-        } catch (IOException e) {
-            Log.e(TAG, "İstek başarısız", e);
-            if (id == generation.get()) {
-                generation.incrementAndGet(); // sırada bekleyen istekler de geçersiz olsun
-                closeInBackground();
-                setState(ConnectionState.LOST, e.getMessage());
+            // Sunucu gerçekten yanıt verdi: bağlantı sağlıklı, deneme sayacı sıfırlanır
+            synchronized (lock) {
+                if (id == generation.get()) {
+                    reconnectAttempts = 0;
+                }
             }
-            postError(callback, "İstek başarısız: " + e.getMessage());
+            postResponse(callback, reply, elapsedMs);
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "İstek başarısız", e);
+            // Okuma zaman aşımı da kopma sayılır: geç gelen yanıt sonraki komutla karışmasın
+            String reason = (e instanceof SocketTimeoutException)
+                    ? "yanıt zaman aşımına uğradı"
+                    : String.valueOf(e.getMessage());
+            handleConnectionLoss(id, reason);
+            postError(callback, "İstek başarısız: " + reason);
+        }
+    }
+
+    /**
+     * Bağlantının koptuğunu işler ve yeniden bağlanmayı başlatır.
+     * Numara eskiyse Kes'e basılmış ya da kopma zaten işlenmiştir, bir şey yapılmaz.
+     */
+    private void handleConnectionLoss(int id, String reason) {
+        synchronized (lock) {
+            if (id != generation.get()) {
+                return;
+            }
+            generation.incrementAndGet(); // sırada bekleyen istekler de geçersiz olsun
+            closeInBackground();
+            setState(ConnectionState.LOST, reason);
+            if (lastHost != null) {
+                scheduleReconnect();
+            }
+        }
+    }
+
+    /**
+     * Sıradaki yeniden bağlanma denemesini bekleme süresinden sonra başlatır (lock altında
+     * çağrılır). Deneme hakkı bittiyse LOST durumunda bırakır ve thread'i serbest bırakır;
+     * kullanıcı elle Bağlan diyebilir.
+     */
+    private void scheduleReconnect() {
+        if (reconnectAttempts >= BACKOFF_SECONDS.length) {
+            generation.incrementAndGet();
+            reconnectAttempts = 0;
+            setState(ConnectionState.LOST,
+                    "Yeniden bağlanılamadı (" + BACKOFF_SECONDS.length + " deneme)");
+            releaseExecutor();
+            return;
+        }
+        final int attempt = ++reconnectAttempts;
+        final int delaySeconds = BACKOFF_SECONDS[attempt - 1];
+        final int id = generation.incrementAndGet();
+        setState(ConnectionState.RECONNECTING,
+                "Deneme " + attempt + "/" + BACKOFF_SECONDS.length
+                        + " (" + delaySeconds + " sn sonra)");
+        Runnable task = () -> {
+            if (id != generation.get()) {
+                return; // beklerken Kes'e basılmış
+            }
+            getExecutor().execute(() -> doReconnect(id, attempt));
+        };
+        pendingReconnect = task;
+        mainHandler.postDelayed(task, delaySeconds * 1000L);
+    }
+
+    private void cancelPendingReconnect() {
+        Runnable task = pendingReconnect;
+        pendingReconnect = null;
+        if (task != null) {
+            mainHandler.removeCallbacks(task);
         }
     }
 
