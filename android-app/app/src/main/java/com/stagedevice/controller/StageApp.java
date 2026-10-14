@@ -5,12 +5,14 @@ import android.app.Application;
 import androidx.appcompat.app.AppCompatDelegate;
 
 /**
- * Uygulama süreciyle birlikte yaşar. SocketClient ve cihaz durumunu burada tutarız ki
- * ekran döndüğünde (Activity yeniden oluşurken) bağlantı ve değerler kaybolmasın.
+ * Uygulama süreciyle birlikte yaşar. SocketClient, cihaz durumu ve log listesini burada
+ * tutarız ki ekran döndüğünde (Activity yeniden oluşurken) bağlantı ve değerler kaybolmasın.
  */
 public class StageApp extends Application {
 
-    private final SocketClient client = new SocketClient();
+    // Sıra önemli: SocketClient, LogStore'u ister, o yüzden LogStore önce oluşturulur
+    private final LogStore logStore = new LogStore();
+    private final SocketClient client = new SocketClient(logStore);
     private final DeviceState deviceState = new DeviceState();
 
     @Override
@@ -26,5 +28,9 @@ public class StageApp extends Application {
 
     public DeviceState getDeviceState() {
         return deviceState;
+    }
+
+    public LogStore getLogStore() {
+        return logStore;
     }
 }

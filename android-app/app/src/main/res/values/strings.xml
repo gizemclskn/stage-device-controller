@@ -30,6 +30,12 @@
     <string name="tab_connection">Bağlantı</string>
     <string name="tab_light">Işık</string>
     <string name="tab_audio">Ses</string>
+    <string name="tab_log">Log</string>
     <string name="channel_label">Kanal %d</string>
     <string name="mute_label">Mute</string>
+    <string name="button_clear_log">Temizle</string>
+    <string name="button_share_log">Paylaş</string>
+    <string name="log_empty">Henüz mesaj yok. Bağlanıp bir komut gönderince burada görünür.</string>
+    <string name="log_share_subject">Stage Device Controller logu</string>
+    <string name="log_share_title">Logu paylaş</string>
 </resources>

@@ -14,4 +14,7 @@
     <color name="accent_light">#FFFFB300</color>
     <color name="accent_audio">#FF26C6DA</color>
     <color name="control_disabled">#FF4A4A55</color>
+
+    <color name="log_sent">#FFFFCA28</color>
+    <color name="log_received">#FF4DD0E1</color>
 </resources>

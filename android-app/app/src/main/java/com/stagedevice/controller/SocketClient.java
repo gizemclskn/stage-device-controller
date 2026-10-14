@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Tüm ağ işi tek bir arka plan thread'inde (ExecutorService) yapılır, çünkü Android
  * ağ işine ana thread'de izin vermez. Sonuçlar Handler ile ana thread'e döner,
  * böylece listener ve callback'lerden ekran güvenle güncellenebilir.
+ * Giden ve gelen her satır ayrıca LogStore'a yazılır (Log ekranı için).
  */
 public class SocketClient {
 
@@ -50,6 +51,9 @@ public class SocketClient {
     // sonucu artık geçersizdir (örneğin bağlanırken Kes'e basılırsa).
     private final AtomicInteger generation = new AtomicInteger();
 
+    // Log ekranının veri kaynağı. Yalnızca ana thread'de değiştirilir (bkz. logMessage).
+    private final LogStore logStore;
+
     private volatile Listener listener;
     private volatile ConnectionState state = ConnectionState.DISCONNECTED;
     private volatile Socket socket;
@@ -57,6 +61,10 @@ public class SocketClient {
     // Yalnızca executor thread'inde kullanılır
     private InputStream in;
     private OutputStream out;
+
+    public SocketClient(LogStore logStore) {
+        this.logStore = logStore;
+    }
 
     public void setListener(Listener listener) {
         this.listener = listener;
@@ -140,7 +148,9 @@ public class SocketClient {
             Log.d(TAG, "-> " + line);
             out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
             out.flush();
+            logMessage(LogEntry.Direction.SENT, line);
             String reply = readLine();
+            logMessage(LogEntry.Direction.RECEIVED, reply);
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             Log.d(TAG, "<- " + reply + " (" + elapsedMs + " ms)");
             postResponse(callback, reply, elapsedMs);
@@ -177,6 +187,16 @@ public class SocketClient {
     }
 
     // ---- Yardımcılar ----
+
+    /**
+     * Mesajı log listesine ekler. Zaman damgası gerçek gönderme/alma anında (burada) alınır,
+     * listeye ekleme ana thread'de yapılır. Handler kuyruğu sırayı koruduğu için
+     * giden mesaj her zaman yanıtından önce görünür.
+     */
+    private void logMessage(LogEntry.Direction direction, String text) {
+        final LogEntry entry = new LogEntry(System.currentTimeMillis(), direction, text);
+        mainHandler.post(() -> logStore.add(entry));
+    }
 
     private void setState(final ConnectionState newState, final String detail) {
         state = newState;
