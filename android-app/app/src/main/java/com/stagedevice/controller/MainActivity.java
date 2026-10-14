@@ -1,10 +1,7 @@
 package com.stagedevice.controller;
 
-import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.util.Log;
-import android.widget.Button;
-import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -13,33 +10,39 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.fragment.app.Fragment;
 
+import com.google.android.material.tabs.TabLayout;
+
+import org.json.JSONException;
+
+/**
+ * Ana ekran: üstte başlık ve durum satırı, altında sekmeler (Bağlantı, Işık, Ses).
+ * Bağlantı durumunu dinler, bağlanınca get_state ile cihaz durumunu yükler ve
+ * görünen sekmeye haber verir.
+ */
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "SDC-MainActivity";
+    private static final String KEY_TAB = "tab";
+
+    private static final int TAB_CONNECTION = 0;
+    private static final int TAB_LIGHT = 1;
+    private static final int TAB_AUDIO = 2;
 
     // Durum göstergesinin renkleri
-    private static final int COLOR_DISCONNECTED = 0xFFC62828; // kırmızı
-    private static final int COLOR_BUSY = 0xFFEF6C00;         // turuncu
-    private static final int COLOR_CONNECTED = 0xFF2E7D32;    // yeşil
+    private static final int COLOR_DISCONNECTED = 0xFFEF5350; // kırmızı
+    private static final int COLOR_BUSY = 0xFFFFA726;         // turuncu
+    private static final int COLOR_CONNECTED = 0xFF66BB6A;    // yeşil
 
-    // Son kullanılan adresin saklandığı yer (SharedPreferences)
-    private static final String PREFS_NAME = "connection";
-    private static final String KEY_IP = "last_ip";
-    private static final String KEY_PORT = "last_port";
-    private static final String DEFAULT_IP = "10.0.2.2"; // emülatörden bilgisayara giden adres
-    private static final int DEFAULT_PORT = 5000;
-
-    private EditText editIp;
-    private EditText editPort;
-    private Button buttonConnect;
-    private Button buttonDisconnect;
-    private Button buttonPing;
     private TextView textStatus;
-    private TextView textPing;
+    private TabLayout tabLayout;
 
-    // Uygulama sürecinde yaşar (StageApp), bu yüzden ekran dönünce bağlantı kopmaz
+    // Uygulama sürecinde yaşarlar (StageApp), bu yüzden ekran dönünce kaybolmaz
     private SocketClient client;
+    private DeviceState deviceState;
+
+    private int shownTab = -1;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,21 +55,47 @@ public class MainActivity extends AppCompatActivity {
             return insets;
         });
 
-        // Ekrandaki öğeleri koda bağla
-        editIp = findViewById(R.id.editIp);
-        editPort = findViewById(R.id.editPort);
-        buttonConnect = findViewById(R.id.buttonConnect);
-        buttonDisconnect = findViewById(R.id.buttonDisconnect);
-        buttonPing = findViewById(R.id.buttonPing);
+        StageApp app = (StageApp) getApplication();
+        client = app.getClient();
+        deviceState = app.getDeviceState();
+
         textStatus = findViewById(R.id.textStatus);
-        textPing = findViewById(R.id.textPing);
+        tabLayout = findViewById(R.id.tabLayout);
 
-        loadLastAddress();
+        tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_connection));
+        tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_light));
+        tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_audio));
+        tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
+            @Override
+            public void onTabSelected(TabLayout.Tab tab) {
+                showTab(tab.getPosition());
+            }
 
-        client = ((StageApp) getApplication()).getClient();
-        buttonConnect.setOnClickListener(view -> onConnectClicked());
-        buttonDisconnect.setOnClickListener(view -> client.disconnect());
-        buttonPing.setOnClickListener(view -> onPingClicked());
+            @Override
+            public void onTabUnselected(TabLayout.Tab tab) {
+                // gerek yok
+            }
+
+            @Override
+            public void onTabReselected(TabLayout.Tab tab) {
+                // gerek yok
+            }
+        });
+
+        // Ekran döndüyse önceki sekmeyi geri getir
+        int saved = savedInstanceState != null
+                ? savedInstanceState.getInt(KEY_TAB, TAB_CONNECTION) : TAB_CONNECTION;
+        TabLayout.Tab tab = tabLayout.getTabAt(saved);
+        if (tab != null) {
+            tab.select();
+        }
+        showTab(saved);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt(KEY_TAB, tabLayout.getSelectedTabPosition());
     }
 
     @Override
@@ -93,20 +122,27 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-    /** Daha önce kaydedilmiş IP ve portu alanlara yazar. Kayıt yoksa varsayılanları kullanır. */
-    private void loadLastAddress() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        editIp.setText(prefs.getString(KEY_IP, DEFAULT_IP));
-        editPort.setText(String.valueOf(prefs.getInt(KEY_PORT, DEFAULT_PORT)));
-    }
-
-    /** Geçerli bir IP ve portu bir sonraki açılış için saklar. */
-    private void saveLastAddress(String ip, int port) {
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putString(KEY_IP, ip)
-                .putInt(KEY_PORT, port)
-                .apply();
+    /** Seçilen sekmenin fragment'ini gösterir. */
+    private void showTab(int position) {
+        if (position == shownTab) {
+            return;
+        }
+        shownTab = position;
+        Fragment fragment;
+        switch (position) {
+            case TAB_LIGHT:
+                fragment = ChannelsFragment.newInstance(CommandBuilder.TYPE_LIGHT);
+                break;
+            case TAB_AUDIO:
+                fragment = ChannelsFragment.newInstance(CommandBuilder.TYPE_AUDIO);
+                break;
+            default:
+                fragment = new ConnectionFragment();
+                break;
+        }
+        getSupportFragmentManager().beginTransaction()
+                .replace(R.id.fragmentContainer, fragment)
+                .commit();
     }
 
     /** Durum satırını günceller: renkli bir nokta ve metin. */
@@ -115,64 +151,12 @@ public class MainActivity extends AppCompatActivity {
         textStatus.setTextColor(color);
     }
 
-    private void onConnectClicked() {
-        if (!validateInputs()) {
-            return; // hata mesajları alanlarda gösterildi, bağlantı denenmez
-        }
-        String ip = editIp.getText().toString().trim();
-        int port = InputValidator.parsePort(editPort.getText().toString());
-        saveLastAddress(ip, port);
-        Log.d(TAG, "Bağlan: " + ip + ":" + port);
-        client.connect(ip, port);
+    private ConnectionAware currentTab() {
+        Fragment fragment = getSupportFragmentManager().findFragmentById(R.id.fragmentContainer);
+        return fragment instanceof ConnectionAware ? (ConnectionAware) fragment : null;
     }
 
-    private void onPingClicked() {
-        buttonPing.setEnabled(false);
-        textPing.setText(R.string.ping_waiting);
-        client.request(CommandBuilder.ping(), new SocketClient.ResponseCallback() {
-            @Override
-            public void onResponse(String line, long elapsedMs) {
-                if (isFinishing() || isDestroyed()) {
-                    return; // ekran bu arada kapanmış ya da yeniden oluşmuş
-                }
-                showPingResult(line, elapsedMs);
-            }
-
-            @Override
-            public void onError(String message) {
-                if (isFinishing() || isDestroyed()) {
-                    return;
-                }
-                Log.w(TAG, "Ping başarısız: " + message);
-                textPing.setText(getString(R.string.ping_error, message));
-                updatePingButton();
-            }
-        });
-    }
-
-    /** Ping yanıtını çözer ve sonucu (süre ya da hata) ekrana yazar. */
-    private void showPingResult(String line, long elapsedMs) {
-        try {
-            ResponseParser.Response response = ResponseParser.parse(line);
-            if (response.isOk() && "pong".equals(response.getCmd())) {
-                textPing.setText(getString(R.string.ping_result, elapsedMs));
-            } else if (!response.isOk()) {
-                textPing.setText(getString(R.string.ping_server_error, response.getErrorCode()));
-            } else {
-                textPing.setText(getString(R.string.ping_unexpected, line));
-            }
-        } catch (ResponseParser.ParseException e) {
-            Log.w(TAG, "Geçersiz ping yanıtı: " + line, e);
-            textPing.setText(getString(R.string.ping_invalid_response, e.getMessage()));
-        }
-        updatePingButton();
-    }
-
-    private void updatePingButton() {
-        buttonPing.setEnabled(client.getState() == ConnectionState.CONNECTED);
-    }
-
-    /** Bağlantı durumuna göre durum satırını, düğmeleri ve alanları ayarlar. */
+    /** Bağlantı durumuna göre durum satırını ayarlar, sekmeye haber verir. */
     private void onConnectionStateChanged(ConnectionState state, String detail) {
         switch (state) {
             case CONNECTING:
@@ -192,60 +176,50 @@ public class MainActivity extends AppCompatActivity {
                 break;
         }
 
-        boolean idle = state == ConnectionState.DISCONNECTED || state == ConnectionState.LOST;
-        buttonConnect.setEnabled(idle);
-        buttonDisconnect.setEnabled(!idle);
-        editIp.setEnabled(idle);
-        editPort.setEnabled(idle);
-        updatePingButton();
-        if (state != ConnectionState.CONNECTED) {
-            textPing.setText(R.string.ping_idle);
+        ConnectionAware tab = currentTab();
+        if (tab != null) {
+            tab.onConnectionState(state, detail);
         }
 
+        boolean idle = state == ConnectionState.DISCONNECTED || state == ConnectionState.LOST;
         if (idle && detail != null) {
             Toast.makeText(this, getString(R.string.toast_connection_problem, detail),
                     Toast.LENGTH_LONG).show();
         }
-    }
 
-    /** IP ve port alanlarını doğrular. Hata varsa ilgili alanda kırmızı uyarı gösterir. */
-    private boolean validateInputs() {
-        String ipError = ipErrorMessage(InputValidator.validateIp(editIp.getText().toString()));
-        String portError = portErrorMessage(
-                InputValidator.validatePort(editPort.getText().toString()));
-
-        editIp.setError(ipError);     // null verilirse eski uyarı temizlenir
-        editPort.setError(portError);
-
-        if (ipError != null) {
-            editIp.requestFocus();
-        } else if (portError != null) {
-            editPort.requestFocus();
-        }
-        return ipError == null && portError == null;
-    }
-
-    private String ipErrorMessage(InputValidator.IpResult result) {
-        switch (result) {
-            case EMPTY:
-                return getString(R.string.error_ip_empty);
-            case INVALID:
-                return getString(R.string.error_ip_invalid);
-            default:
-                return null;
+        if (state == ConnectionState.CONNECTED) {
+            requestDeviceState();
         }
     }
 
-    private String portErrorMessage(InputValidator.PortResult result) {
-        switch (result) {
-            case EMPTY:
-                return getString(R.string.error_port_empty);
-            case INVALID:
-                return getString(R.string.error_port_invalid);
-            case OUT_OF_RANGE:
-                return getString(R.string.error_port_range);
-            default:
-                return null;
-        }
+    /** get_state ile cihazın gerçek durumunu çeker ve kaydırıcılara yansıtır. */
+    private void requestDeviceState() {
+        client.request(CommandBuilder.getState(), new SocketClient.ResponseCallback() {
+            @Override
+            public void onResponse(String line, long elapsedMs) {
+                if (isDestroyed()) {
+                    return;
+                }
+                try {
+                    ResponseParser.Response response = ResponseParser.parse(line);
+                    if (response.isOk() && "get_state".equals(response.getCmd())) {
+                        deviceState.loadFrom(response.getJson());
+                        ConnectionAware tab = currentTab();
+                        if (tab != null) {
+                            tab.onDeviceStateLoaded();
+                        }
+                    } else {
+                        Log.w(TAG, "get_state beklenmeyen yanıt: " + line);
+                    }
+                } catch (ResponseParser.ParseException | JSONException e) {
+                    Log.w(TAG, "get_state yanıtı çözülemedi: " + line, e);
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                Log.w(TAG, "get_state başarısız: " + message);
+            }
+        });
     }
 }

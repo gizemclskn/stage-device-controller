@@ -1,7 +1,19 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Koyu sahne konsolu teması: sarı ana vurgu, turkuaz ikincil vurgu. -->
     <style name="Base.Theme.StageDeviceController" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+        <item name="colorPrimary">@color/accent_light</item>
+        <item name="colorOnPrimary">@color/on_accent</item>
+        <item name="colorSecondary">@color/accent_audio</item>
+        <item name="colorOnSecondary">@color/stage_bg</item>
+        <item name="android:colorBackground">@color/stage_bg</item>
+        <item name="colorSurface">@color/stage_bg</item>
+        <item name="colorOnSurface">@color/stage_text</item>
+        <item name="colorOnBackground">@color/stage_text</item>
+        <item name="colorSurfaceVariant">@color/stage_surface</item>
+        <item name="colorOnSurfaceVariant">@color/stage_text_dim</item>
+        <item name="colorOutline">@color/stage_outline</item>
+        <item name="colorError">@color/stage_error</item>
     </style>
+
+    <style name="Theme.StageDeviceController" parent="Base.Theme.StageDeviceController" />
 </resources>
