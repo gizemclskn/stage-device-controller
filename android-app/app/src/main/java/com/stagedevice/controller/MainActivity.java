@@ -31,9 +31,9 @@ public class MainActivity extends AppCompatActivity {
     private static final int TAB_AUDIO = 2;
 
     // Durum göstergesinin renkleri
-    private static final int COLOR_DISCONNECTED = 0xFFC62828; // kırmızı
-    private static final int COLOR_BUSY = 0xFFEF6C00;         // turuncu
-    private static final int COLOR_CONNECTED = 0xFF2E7D32;    // yeşil
+    private static final int COLOR_DISCONNECTED = 0xFFEF5350; // kırmızı
+    private static final int COLOR_BUSY = 0xFFFFA726;         // turuncu
+    private static final int COLOR_CONNECTED = 0xFF66BB6A;    // yeşil
 
     private TextView textStatus;
     private TabLayout tabLayout;

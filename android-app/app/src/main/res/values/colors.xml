@@ -2,4 +2,16 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <color name="stage_bg">#FF121214</color>
+    <color name="stage_surface">#FF1C1C20</color>
+    <color name="stage_outline">#FF3A3A44</color>
+    <color name="stage_text">#FFECECF1</color>
+    <color name="stage_text_dim">#FFA8A8B3</color>
+    <color name="stage_error">#FFEF5350</color>
+    <color name="on_accent">#FF1A1200</color>
+
+    <color name="accent_light">#FFFFB300</color>
+    <color name="accent_audio">#FF26C6DA</color>
+    <color name="control_disabled">#FF4A4A55</color>
 </resources>

@@ -3,13 +3,16 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:gravity="center_vertical"
-    android:minHeight="56dp"
-    android:orientation="horizontal">
+    android:minHeight="60dp"
+    android:orientation="horizontal"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
 
     <TextView
         android:id="@+id/textLabel"
         android:layout_width="72dp"
         android:layout_height="wrap_content"
+        android:textSize="15sp"
         android:textStyle="bold" />
 
     <SeekBar
@@ -21,10 +24,12 @@
 
     <TextView
         android:id="@+id/textValue"
-        android:layout_width="40dp"
+        android:layout_width="44dp"
         android:layout_height="wrap_content"
         android:gravity="end"
-        android:text="0" />
+        android:text="0"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="16sp" />
 
     <CheckBox
         android:id="@+id/checkMute"

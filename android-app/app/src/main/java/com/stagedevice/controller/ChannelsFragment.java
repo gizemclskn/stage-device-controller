@@ -1,5 +1,6 @@
 package com.stagedevice.controller;
 
+import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
@@ -13,6 +14,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 /**
@@ -62,6 +64,7 @@ public class ChannelsFragment extends Fragment implements ConnectionAware {
                              @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_channels, container, false);
         ViewGroup rows = view.findViewById(R.id.rows);
+        ColorStateList tint = createTint();
 
         for (int i = 0; i < DeviceState.CHANNELS; i++) {
             final int index = i;
@@ -73,6 +76,10 @@ public class ChannelsFragment extends Fragment implements ConnectionAware {
             seekBars[i] = row.findViewById(R.id.seekBar);
             valueTexts[i] = row.findViewById(R.id.textValue);
             muteBoxes[i] = row.findViewById(R.id.checkMute);
+
+            seekBars[i].setProgressTintList(tint);
+            seekBars[i].setThumbTintList(tint);
+            muteBoxes[i].setButtonTintList(tint);
 
             seekBars[i].setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
@@ -151,6 +158,16 @@ public class ChannelsFragment extends Fragment implements ConnectionAware {
             }
         }
         updatingUi = false;
+    }
+
+    /** Işık sekmesi sarı, ses sekmesi turkuaz. Kullanılamazken soluk gri. */
+    private ColorStateList createTint() {
+        int accent = ContextCompat.getColor(requireContext(),
+                audio ? R.color.accent_audio : R.color.accent_light);
+        int disabled = ContextCompat.getColor(requireContext(), R.color.control_disabled);
+        return new ColorStateList(
+                new int[][]{{-android.R.attr.state_enabled}, {}},
+                new int[]{disabled, accent});
     }
 
     private void setControlsEnabled(boolean enabled) {
