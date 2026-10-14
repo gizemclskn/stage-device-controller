@@ -1,6 +1,6 @@
 # stage-device-controller: Proje Planı (v3)
 
-Son güncelleme: 9 Ekim 2026
+Son güncelleme: 14 Ekim 2026
 Durum işaretleri: **[x]** bitti, **[ ]** yapılacak, **⭐** opsiyonel (zaman kalırsa)
 
 ---
@@ -47,6 +47,7 @@ Proje bittiğinde şunların hepsi doğru olmalı:
 - Geliştirme ortamı: Windows, Python 3.12 (sunucu yalnızca standart kütüphane kullanır)
 - Kod yorumları **Türkçe**; sınıf, metot ve değişken adları, commit mesajları **İngilizce**; README **İngilizce + Türkçe**
 - Lisans dosyası yok (bilinçli karar)
+- Uygulama koyu moda kilitli (`StageApp`'te `AppCompatDelegate.MODE_NIGHT_YES`). Tema renkleri hem `values/themes.xml` hem `values-night/themes.xml` içinde aynı tutulmalı, yoksa Material3 varsayılan moru görünür
 
 **Protokol ve davranış**
 - Kanal numaraları 1-8 (arayüzde "Kanal 1..8")
@@ -98,22 +99,22 @@ Süreler tahminidir. Toplam: çekirdek (Aşama 0-9) yaklaşık **48-63 saat**, A
 - [x] 0.2 Klasör yapısı, `git init`
 - [x] 0.3 `.gitignore` ve çift dilli ilk README
 - [x] 0.4 GitHub'da repo, remote, ilk push
-- [ ] 0.5 Android Studio kurulumu, sanallaştırma (emülatör için) ve RAM kontrolü
-- [ ] 0.6 Bu planı `docs/PLAN.md` olarak güncelleme (commit: `Update project plan`)
+- [x] 0.5 Android Studio kurulumu, sanallaştırma (emülatör için) ve RAM kontrolü
+- [x] 0.6 Bu planı `docs/PLAN.md` olarak güncelleme (commit: `Update project plan`)
 
 **Bitti ölçütü:** GitHub'da repo, klasörler ve güncel plan görünüyor; Android Studio emülatörü açabilecek durumda.
 
 ### Aşama 1: Python sunucusu (~5-6 sa) · `feature/tcp-server`
-- [ ] 1.1 Sunucu iskeleti: socket dinleme, her istemci için thread
-- [ ] 1.2 Satır tamponlama: yarım satır, birleşik satır, 1 KB sınırı (aşılırsa `INVALID_JSON`)
-- [ ] 1.3 Durum modeli: 8 ışık, 8 ses (level + mute), `threading.Lock` ile koruma
-- [ ] 1.4 Komut işleyicileri: ping, set_level, set_mute, get_state
-- [ ] 1.5 Doğrulama, 4 hata kodu, çökmeme garantisi (hiçbir girdi sunucuyu düşürmemeli)
-- [ ] 1.6 Zaman damgalı konsol logu (istemci adresi, gelen/giden mesaj)
-- [ ] 1.7 Komut satırı argümanları: `--host`, `--port`
-- [ ] 1.8 Ctrl+C ile düzgün kapanma, boşta kalan istemci için timeout (`--idle-timeout`)
-- [ ] 1.9 `test_client.py`: elle komut gönderme aracı
-- [ ] 1.10 **Hata enjeksiyon modu:** `--latency-ms N` (her yanıta yapay gecikme), `--drop-rate X` (komutların bir kısmına yanıt vermeme, 0-1 arası). README'de anlatılacak
+- [x] 1.1 Sunucu iskeleti: socket dinleme, her istemci için thread
+- [x] 1.2 Satır tamponlama: yarım satır, birleşik satır, 1 KB sınırı (aşılırsa `INVALID_JSON`)
+- [x] 1.3 Durum modeli: 8 ışık, 8 ses (level + mute), `threading.Lock` ile koruma
+- [x] 1.4 Komut işleyicileri: ping, set_level, set_mute, get_state
+- [x] 1.5 Doğrulama, 4 hata kodu, çökmeme garantisi (hiçbir girdi sunucuyu düşürmemeli)
+- [x] 1.6 Zaman damgalı konsol logu (istemci adresi, gelen/giden mesaj)
+- [x] 1.7 Komut satırı argümanları: `--host`, `--port`
+- [x] 1.8 Ctrl+C ile düzgün kapanma, boşta kalan istemci için timeout (`--idle-timeout`)
+- [x] 1.9 `test_client.py`: elle komut gönderme aracı
+- [x] 1.10 **Hata enjeksiyon modu:** `--latency-ms N` (her yanıta yapay gecikme), `--drop-rate X` (komutların bir kısmına yanıt vermeme, 0-1 arası). README'de anlatılacak
 
 **Commit planı:**
 `Add TCP server skeleton with line buffering` ·
@@ -126,14 +127,14 @@ Süreler tahminidir. Toplam: çekirdek (Aşama 0-9) yaklaşık **48-63 saat**, A
 **Bitti ölçütü:** 4 komut ve 4 hata kodu test istemcisiyle doğru yanıtlanıyor, 2 istemci aynı anda bağlanabiliyor, bozuk girdiyle sunucu çökmüyor, Ctrl+C temiz kapatıyor, hata enjeksiyonu gözlemlenebiliyor.
 
 ### Aşama 2: Android iskeleti (~4-5 sa) · `feature/android-skeleton`
-- [ ] 2.1 Empty Views Activity projesi (Java, minSdk 24), `android-app/` klasöründe
-- [ ] 2.2 Emülatör (AVD) oluşturma ve ilk çalıştırma
-- [ ] 2.3 `INTERNET` izni (ham TCP için `usesCleartextTraffic` gerekmez)
-- [ ] 2.4 Bağlantı arayüzü: IP, port, Bağlan/Kes butonu, durum göstergesi
-- [ ] 2.5 IP/port doğrulama: boş, geçersiz format, port 1-65535, düzgün uyarı mesajı
-- [ ] 2.6 Son IP/port'u SharedPreferences ile hatırlama
-- [ ] 2.7 Emülatör için `10.0.2.2`, gerçek telefon için yerel IP notları
-- [ ] 2.8 Windows güvenlik duvarında Python için inbound kural notu (gerçek telefon için)
+- [x] 2.1 Empty Views Activity projesi (Java, minSdk 24), `android-app/` klasöründe
+- [x] 2.2 Emülatör (AVD) oluşturma ve ilk çalıştırma
+- [x] 2.3 `INTERNET` izni (ham TCP için `usesCleartextTraffic` gerekmez)
+- [x] 2.4 Bağlantı arayüzü: IP, port, Bağlan/Kes butonu, durum göstergesi
+- [x] 2.5 IP/port doğrulama: boş, geçersiz format, port 1-65535, düzgün uyarı mesajı
+- [x] 2.6 Son IP/port'u SharedPreferences ile hatırlama
+- [x] 2.7 Emülatör için `10.0.2.2`, gerçek telefon için yerel IP notları
+- [x] 2.8 Windows güvenlik duvarında Python için inbound kural notu (gerçek telefon için)
 
 **Commit planı:**
 `Create Android project skeleton` ·
@@ -144,15 +145,15 @@ Süreler tahminidir. Toplam: çekirdek (Aşama 0-9) yaklaşık **48-63 saat**, A
 **Bitti ölçütü:** Uygulama emülatörde açılıyor, arayüz doğru görünüyor, geçersiz girdi uyarı veriyor, son adres hatırlanıyor.
 
 ### Aşama 3: SocketClient, ilk uçtan uca sürüm (~7-9 sa) · `feature/socket-client`
-- [ ] 3.1 `ConnectionState` enum'u (DISCONNECTED, CONNECTED, LOST, RECONNECTING)
-- [ ] 3.2 `SocketClient`: tek thread'li `ExecutorService`, connect/disconnect
-- [ ] 3.3 Satır gönder, satır oku, bağlanma ve okuma timeout'u (okuma timeout'u bağlantıyı LOST yapar), `try/finally` ile kaynak temizliği
-- [ ] 3.4 `CommandBuilder` (ping), `ResponseParser`
-- [ ] 3.5 Callback ile UI thread'ine geçiş (`runOnUiThread` veya `Handler`)
-- [ ] 3.6 Ping butonu, yanıt süresini (ms) gösterme
-- [ ] 3.7 **SocketClient ömrü:** tek örnek `Application` sınıfında yaşar, ekran döndürmede bağlantı korunur. Activity callback'i `onStart`'ta kaydeder, `onStop`'ta kaldırır (bellek sızıntısı olmasın)
-- [ ] 3.8 `CommandBuilder` ve `ResponseParser` için JUnit testleri
-- [ ] 3.9 `Log.d/e` ile tutarlı logcat etiketleri, logcat okuma alıştırması
+- [x] 3.1 `ConnectionState` enum'u (DISCONNECTED, CONNECTED, LOST, RECONNECTING)
+- [x] 3.2 `SocketClient`: tek thread'li `ExecutorService`, connect/disconnect
+- [x] 3.3 Satır gönder, satır oku, bağlanma ve okuma timeout'u (okuma timeout'u bağlantıyı LOST yapar), `try/finally` ile kaynak temizliği
+- [x] 3.4 `CommandBuilder` (ping), `ResponseParser`
+- [x] 3.5 Callback ile UI thread'ine geçiş (`runOnUiThread` veya `Handler`)
+- [x] 3.6 Ping butonu, yanıt süresini (ms) gösterme
+- [x] 3.7 **SocketClient ömrü:** tek örnek `Application` sınıfında yaşar, ekran döndürmede bağlantı korunur. Activity callback'i `onStart`'ta kaydeder, `onStop`'ta kaldırır (bellek sızıntısı olmasın)
+- [x] 3.8 `CommandBuilder` ve `ResponseParser` için JUnit testleri
+- [x] 3.9 `Log.d/e` ile tutarlı logcat etiketleri, logcat okuma alıştırması
 
 **Commit planı:**
 `Add ConnectionState enum` ·
@@ -164,16 +165,16 @@ Süreler tahminidir. Toplam: çekirdek (Aşama 0-9) yaklaşık **48-63 saat**, A
 **Bitti ölçütü:** Emülatörden sunucuya bağlanıp ping atılıyor, ekran döndürünce bağlantı kopmuyor, JUnit testleri geçiyor. **Tag: `v0.1.0`**
 
 ### Aşama 4: Işık ve ses kontrolleri (~7-9 sa) · `feature/controls`
-- [ ] 4.1 Sekme yapısı (TabLayout + ViewPager2 veya basit Fragment geçişi)
-- [ ] 4.2 Işık sekmesi: 8 SeekBar, her biri için etiket ve değer
-- [ ] 4.3 Ses sekmesi: 8 SeekBar + mute butonu
-- [ ] 4.4 Kontrollü gönderme: bırakınca, sürüklerken en fazla 100 ms'de bir
-- [ ] 4.5 `CommandBuilder`'a set_level, set_mute, get_state ekleme
-- [ ] 4.6 Bağlanınca `get_state` ile arayüzü başlangıç durumuna getirme
-- [ ] 4.7 Bağlı değilken kontrollerin devre dışı kalması
-- [ ] 4.8 Sunucu hata yanıtında kullanıcıya kısa mesaj (Toast/Snackbar)
-- [ ] 4.9 Görsel cila: tutarlı renk paleti, kanal etiketleri, dikey/yatay düzen kontrolü
-- [ ] 4.10 Uygulama ikonu ve adı
+- [x] 4.1 Sekme yapısı (TabLayout + basit Fragment geçişi seçildi, ViewPager2 kullanılmadı)
+- [x] 4.2 Işık sekmesi: 8 SeekBar, her biri için etiket ve değer
+- [x] 4.3 Ses sekmesi: 8 SeekBar + mute butonu
+- [x] 4.4 Kontrollü gönderme: bırakınca, sürüklerken en fazla 100 ms'de bir
+- [x] 4.5 `CommandBuilder`'a set_level, set_mute, get_state ekleme
+- [x] 4.6 Bağlanınca `get_state` ile arayüzü başlangıç durumuna getirme
+- [x] 4.7 Bağlı değilken kontrollerin devre dışı kalması
+- [x] 4.8 Sunucu hata yanıtında kullanıcıya kısa mesaj (Toast/Snackbar)
+- [x] 4.9 Görsel cila: koyu sahne konsolu teması (sarı ana vurgu, ışık sekmesi sarı, ses sekmesi turkuaz), kanal etiketleri, dikey/yatay düzen kontrolü
+- [x] 4.10 Uygulama ikonu (koyu zeminde üç fader) ve adı ("Stage Device Controller")
 
 **Commit planı:**
 `Add tab layout for light and audio` ·
@@ -345,6 +346,7 @@ Aşama 3 ve 7 en zorlu noktalar, gerekirse orada fazladan gün ayır. README bö
 | Ekran döndürmede bağlantı kaybı | `SocketClient`'ı `Application` düzeyinde tutmak, Activity'de callback kaydı/kaldırması |
 | Geç gelen yanıtın sonraki komutla karışması | Okuma timeout'unda bağlantıyı LOST yapıp yeniden bağlanmak |
 | Boşta kalma timeout'u kullanıcıyı yanıltıyor | 300 sn varsayılan, ilk komutta yeniden bağlanma, README'de açıklama |
+| Emülatörde sunucu kapanışı uygulamaya hemen ulaşmıyor | Aşama 4 elle testinde gözlendi: durum "Bağlı" kalıyor, kopma ilk komutta algılanıyor. Hata değil, emülatör davranışı; 6.1 ve 6.7'de bu bilgiyle test et |
 | Kapsamın şişmesi | Kapsam tablosuna sadık kalmak, yeni fikirleri "gelecek çalışmalar"a yazmak |
 | Kodu anlamadan ilerlemek | Her aşamada mülakat notu, takıldığın yeri sormak |
 
@@ -368,4 +370,4 @@ Severity: low / medium / high
 
 Her aşamada bu sırayla ilerliyoruz: özet → tam kod (dosya yollarıyla) → çalıştırma/test → Git adımı → mülakat notu. "Tamam, çalıştı" ya da hata çıktısı gelmeden sonraki aşamaya geçilmez.
 
-**Şu anki konum:** Aşama 0'da yalnızca 0.5 (Android Studio kurulumu) ve 0.6 (planın güncellenmesi) açık. Aşama 1'de 1.1-1.2 kodu yazıldı, çalıştırma çıktısı bekleniyor.
+**Şu anki konum:** Aşama 0-4 tamam (`v0.1.0` yayında). Aşama 4 `feature/controls` branch'inde bitti ve push edildi, `main`'e merge edilecek. Sıradaki: **Aşama 5 (Log ekranı)**, branch `feature/log-screen`.
