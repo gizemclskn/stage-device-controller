@@ -197,6 +197,6 @@ Sahne ve AV dünyasında ışık için genellikle DMX512 (seri hat, kanal başı
 ```
 android-app/    Android uygulaması (Java, Gradle)
 server/         Python simülatör sunucusu, elle test istemcisi, unittest testleri
-docs/           Protokol, ağ notları, proje planı, ekran görüntüleri
+docs/           Protokol, ağ notları, ekran görüntüleri
 .github/        CI workflow'u (python-tests.yml) ve hata raporu şablonu
 ```
