@@ -20,12 +20,12 @@ public class ConnectionFragment extends Fragment implements ConnectionAware {
 
     private static final String TAG = "SDC-ConnectionFragment";
 
-    // Son kullanılan adresin saklandığı yer (SharedPreferences)
-    private static final String PREFS_NAME = "connection";
-    private static final String KEY_IP = "last_ip";
-    private static final String KEY_PORT = "last_port";
-    private static final String DEFAULT_IP = "10.0.2.2"; // emülatörden bilgisayara giden adres
-    private static final int DEFAULT_PORT = 5000;
+    // Son kullanılan adresin saklandığı yer (SharedPreferences). TestFragment da okur.
+    static final String PREFS_NAME = "connection";
+    static final String KEY_IP = "last_ip";
+    static final String KEY_PORT = "last_port";
+    static final String DEFAULT_IP = "10.0.2.2"; // emülatörden bilgisayara giden adres
+    static final int DEFAULT_PORT = 5000;
 
     private EditText editIp;
     private EditText editPort;

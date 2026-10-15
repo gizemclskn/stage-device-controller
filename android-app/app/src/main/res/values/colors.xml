@@ -17,4 +17,6 @@
 
     <color name="log_sent">#FFFFCA28</color>
     <color name="log_received">#FF4DD0E1</color>
+
+    <color name="test_pass">#FF66BB6A</color>
 </resources>
