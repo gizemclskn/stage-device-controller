@@ -17,7 +17,7 @@ import com.google.android.material.tabs.TabLayout;
 import org.json.JSONException;
 
 /**
- * Ana ekran: üstte başlık ve durum satırı, altında sekmeler (Bağlantı, Işık, Ses, Log).
+ * Ana ekran: üstte başlık ve durum satırı, altında sekmeler (Bağlantı, Işık, Ses, Log, Test).
  * Bağlantı durumunu dinler, bağlanınca get_state ile cihaz durumunu yükler ve
  * görünen sekmeye haber verir.
  */
@@ -30,6 +30,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int TAB_LIGHT = 1;
     private static final int TAB_AUDIO = 2;
     private static final int TAB_LOG = 3;
+    private static final int TAB_TEST = 4;
 
     // Durum göstergesinin renkleri
     private static final int COLOR_DISCONNECTED = 0xFFEF5350; // kırmızı
@@ -67,6 +68,7 @@ public class MainActivity extends AppCompatActivity {
         tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_light));
         tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_audio));
         tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_log));
+        tabLayout.addTab(tabLayout.newTab().setText(R.string.tab_test));
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
             public void onTabSelected(TabLayout.Tab tab) {
@@ -140,6 +142,9 @@ public class MainActivity extends AppCompatActivity {
                 break;
             case TAB_LOG:
                 fragment = new LogFragment();
+                break;
+            case TAB_TEST:
+                fragment = new TestFragment();
                 break;
             default:
                 fragment = new ConnectionFragment();
