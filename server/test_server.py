@@ -254,6 +254,9 @@ class FakeClient:
     def close(self):
         self.reader.close()
         self.sock.close()
+        # Sunucu thread'i çıkmadan test bitmemeli. Yoksa thread, log mock'u
+        # kalktıktan sonra gerçek log()'a yazıp kapanışta çökebilir.
+        self.thread.join(timeout=3)
 
 
 class ConnectionTests(ServerTestCase):
