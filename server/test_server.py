@@ -251,9 +251,10 @@ class FakeClient:
     def read(self):
         return json.loads(self.reader.readline())
 
-    def close(self):
+  def close(self):
         self.reader.close()
         self.sock.close()
+        self.thread.join(timeout=3)
 
 
 class ConnectionTests(ServerTestCase):
