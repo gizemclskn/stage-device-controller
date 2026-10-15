@@ -1,54 +1,54 @@
-# Protocol
+# Protokol
 
-Newline-delimited JSON over TCP. One JSON object per line (`\n`), UTF-8. Default port: 5000.
+TCP üzerinden satır tabanlı JSON (newline-delimited JSON). Satır başına bir JSON nesnesi (`\n` ile biter), UTF-8. Varsayılan port: 5000.
 
-## Rules
+## Kurallar
 
-- Channels are numbered 1-8.
-- `value` is an integer between 0 and 100. Decimals, strings, `true/false` and out-of-range numbers are rejected with `INVALID_VALUE`.
-- Mute applies to audio channels only, so `set_mute` has no `type` field.
-- Maximum line length is 1 KB. A longer line is rejected with `INVALID_JSON`, the rest of the line is discarded and the connection stays open.
-- Initial state: all lights 0, all audio levels 0, mute off.
-- In `get_state`, array index 0 is Channel 1.
+- Kanallar 1-8 arası numaralanır.
+- `value`, 0 ile 100 arasında bir tam sayıdır. Ondalık sayılar, metinler, `true/false` ve aralık dışı sayılar `INVALID_VALUE` ile reddedilir.
+- Mute yalnızca ses kanallarına uygulanır, bu yüzden `set_mute` komutunda `type` alanı yoktur.
+- Satır uzunluğu en fazla 1 KB olabilir. Daha uzun bir satır `INVALID_JSON` ile reddedilir, satırın kalanı atılır ve bağlantı açık kalır.
+- Başlangıç durumu: tüm ışıklar 0, tüm ses seviyeleri 0, mute kapalı.
+- `get_state` yanıtındaki dizilerde indeks 0 Kanal 1'dir.
 
-## Commands
+## Komutlar
 
-| Command | Request | Success response |
+| Komut | İstek | Başarılı yanıt |
 |---|---|---|
 | ping | `{"cmd":"ping"}` | `{"status":"ok","cmd":"pong"}` |
-| set_level | `{"cmd":"set_level","type":"light","channel":3,"value":75}` | same fields + `"status":"ok"` |
+| set_level | `{"cmd":"set_level","type":"light","channel":3,"value":75}` | aynı alanlar + `"status":"ok"` |
 | set_mute | `{"cmd":"set_mute","channel":2,"mute":true}` | `{"status":"ok","cmd":"set_mute","channel":2,"mute":true}` |
-| get_state | `{"cmd":"get_state"}` | `{"status":"ok","cmd":"get_state","light":[8 numbers],"audio":[{"level":..,"mute":..} x8]}` |
+| get_state | `{"cmd":"get_state"}` | `{"status":"ok","cmd":"get_state","light":[8 sayı],"audio":[{"level":..,"mute":..} x8]}` |
 
-For `set_level`, `type` is `light` or `audio`.
-The `"cmd":"pong"` in the ping response is a deliberate design choice.
+`set_level` için `type` değeri `light` veya `audio` olur.
+Ping yanıtındaki `"cmd":"pong"`, bilinçli bir tasarım tercihidir.
 
-## Errors
+## Hatalar
 
-Error response format:
+Hata yanıtı biçimi:
 
 ```json
 {"status":"error","code":"INVALID_VALUE","message":"..."}
 ```
 
-`message` is for humans. Clients should only look at `code`.
+`message` insan okuması içindir. İstemciler yalnızca `code` alanına bakmalıdır.
 
-| Situation | Code |
+| Durum | Kod |
 |---|---|
-| Malformed JSON, valid JSON that is not an object (`5`, `[1]`), empty line, line longer than 1 KB | `INVALID_JSON` |
-| Unknown or missing `cmd` | `UNKNOWN_CMD` |
-| `channel` missing, not an integer, or outside 1-8 | `INVALID_CHANNEL` |
-| `type` missing or not `light`/`audio` | `INVALID_VALUE` |
-| `value` missing, decimal, string, `true/false`, or outside 0-100 | `INVALID_VALUE` |
-| `mute` is not a boolean | `INVALID_VALUE` |
+| Bozuk JSON, JSON olup nesne olmayan değer (`5`, `[1]`), boş satır, 1 KB'ı aşan satır | `INVALID_JSON` |
+| Tanınmayan ya da eksik `cmd` | `UNKNOWN_CMD` |
+| `channel` eksik, tam sayı değil veya 1-8 dışı | `INVALID_CHANNEL` |
+| `type` eksik veya `light`/`audio` dışı | `INVALID_VALUE` |
+| `value` eksik, ondalık, metin, `true/false` veya 0-100 dışı | `INVALID_VALUE` |
+| `mute` bool değil | `INVALID_VALUE` |
 
-## Timeouts
+## Zaman aşımları
 
-- Client connect timeout: 3 s. Client read timeout: 3 s.
-- On a read timeout the client treats the request as failed and marks the connection as lost, so a late response can never be mistaken for the answer to the next command.
-- The server closes a client that sends nothing for 300 s (`--idle-timeout`).
+- İstemci bağlanma zaman aşımı: 3 sn. İstemci okuma zaman aşımı: 3 sn.
+- Okuma zaman aşımında istemci isteği başarısız sayar ve bağlantıyı kopmuş olarak işaretler. Böylece geç gelen bir yanıt, sonraki komutun yanıtı sanılamaz.
+- Sunucu, 300 sn boyunca hiçbir şey göndermeyen istemciyi kapatır (`--idle-timeout`).
 
-## Fault injection (server options)
+## Hata enjeksiyonu (sunucu seçenekleri)
 
-- `--latency-ms N`: delays every response by N milliseconds.
-- `--drop-rate X`: does not answer a fraction X (0-1) of commands.
+- `--latency-ms N`: her yanıtı N milisaniye geciktirir.
+- `--drop-rate X`: komutların X oranında (0-1) bir kısmına yanıt vermez.
